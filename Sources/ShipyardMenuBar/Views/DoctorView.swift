@@ -20,10 +20,17 @@ struct DoctorView: View {
                         .padding(.top, 20)
                 }
 
-                Text("Machine-level checks. Per-repo probes run via \u{201C}shipyard doctor\u{201D} in each worktree.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 4)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("What this checked")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .textCase(.uppercase)
+                    Text("Machine tools only — git, ssh, gh, nsc. Release-pipeline and per-repo checks (RELEASE_BOT_TOKEN, tag drift, governance) only appear when the CLI is invoked from inside a specific worktree. Run `shipyard doctor` in a terminal to see those for a given repo.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                .padding(.top, 10)
             }
             .padding(14)
         }
@@ -66,6 +73,7 @@ struct DoctorView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .disabled(checking || store.cliBinaryResolved == nil)
+            .help("Run `shipyard doctor --json` again")
         }
     }
 
@@ -125,29 +133,43 @@ struct DoctorView: View {
 
     @ViewBuilder
     private func entryRow(_ entry: DoctorEntry) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: entry.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(entry.ok ? .green : .red)
-                .font(.system(size: 12))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(entry.name)
-                    .font(.system(size: 12, weight: .medium))
-                if let version = entry.version {
-                    Text(version)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+        Button {
+            var parts: [String] = [entry.name]
+            if let v = entry.version { parts.append(v) }
+            if let d = entry.detail { parts.append(d) }
+            ClipboardToast.shared.copy(parts.joined(separator: "\n"), label: "Copied \(entry.name)")
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: entry.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(entry.ok ? .green : .red)
+                    .font(.system(size: 12))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.name)
+                        .font(.system(size: 12, weight: .medium))
+                    if let version = entry.version {
+                        Text(version)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    if let detail = entry.detail, !entry.ok {
+                        Text(detail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                            .padding(.top, 2)
+                    }
                 }
-                if let detail = entry.detail, !entry.ok {
-                    Text(detail)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.orange)
-                        .padding(.top, 2)
-                }
+                Spacer()
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .opacity(0.7)
             }
-            Spacer()
+            .contentShape(Rectangle())
+            .padding(.vertical, 4)
         }
-        .padding(.vertical, 4)
+        .buttonStyle(.plain)
+        .help("Click to copy \(entry.name) details")
     }
 
     private func relative(_ date: Date) -> String {

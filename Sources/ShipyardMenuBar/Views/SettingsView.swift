@@ -17,17 +17,37 @@ struct SettingsView: View {
     private var cliSection: some View {
         Section("Shipyard CLI") {
             HStack {
-                TextField("Path to `shipyard` binary", text: $store.cliBinaryPath)
-                    .textFieldStyle(.roundedBorder)
+                TextField(
+                    "auto-detected",
+                    text: Binding(
+                        get: {
+                            // Show the actual user-set path if any,
+                            // otherwise the auto-resolved path so the
+                            // field isn't visually empty while the app
+                            // is clearly functional.
+                            store.cliBinaryPath.isEmpty
+                                ? (store.cliBinaryResolved ?? "")
+                                : store.cliBinaryPath
+                        },
+                        set: { store.cliBinaryPath = $0 }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11, design: .monospaced))
                 Button("Browse…", action: browse)
+                    .help("Open a file picker to locate the shipyard binary")
                 Button("Resolve", action: store.resolveCLIBinary)
+                    .help("Re-scan the default install paths")
             }
-            if let resolved = store.cliBinaryResolved {
-                Text("✓ resolved: \(resolved)")
+            if store.cliBinaryResolved != nil {
+                Label("Auto-detected — override above to point elsewhere.",
+                      systemImage: "checkmark.circle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.green)
+                    .labelStyle(.titleAndIcon)
             } else if let err = store.cliBinaryError {
                 HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
                     Text(err)
                     Link("Install →",
                          destination: URL(string: "https://github.com/danielraffel/Shipyard#installation")!)

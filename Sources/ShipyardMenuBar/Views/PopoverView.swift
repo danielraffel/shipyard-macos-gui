@@ -1,13 +1,13 @@
 import SwiftUI
 
 enum PopoverTab: String, CaseIterable, Identifiable {
-    case ships = "Ships"
+    case runners = "Runners"
     case doctor = "Doctor"
     case settings = "Settings"
     var id: String { rawValue }
     var systemImage: String {
         switch self {
-        case .ships: return "shippingbox"
+        case .runners: return "figure.run"
         case .doctor: return "stethoscope"
         case .settings: return "gearshape"
         }
@@ -16,7 +16,7 @@ enum PopoverTab: String, CaseIterable, Identifiable {
 
 struct PopoverView: View {
     @EnvironmentObject var store: AppStore
-    @State private var tab: PopoverTab = .ships
+    @State private var tab: PopoverTab = .runners
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,7 +24,7 @@ struct PopoverView: View {
             Divider().opacity(0.3)
             Group {
                 switch tab {
-                case .ships: ShipsView()
+                case .runners: ShipsView()
                 case .doctor: DoctorView()
                 case .settings: SettingsView()
                 }
@@ -32,6 +32,10 @@ struct PopoverView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(.regularMaterial)
+        .overlay(alignment: .bottom) {
+            ClipboardToastView()
+                .padding(.bottom, 14)
+        }
     }
 
     private var headerBar: some View {
@@ -52,14 +56,15 @@ struct PopoverView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Quit Shipyard")
+                .help("Quit Shipyard (⌘Q)")
                 .keyboardShortcut("q", modifiers: .command)
             }
             .padding(.horizontal, 12)
             .padding(.top, 10)
             .padding(.bottom, 6)
 
-            // Tab row
+            // Tab row — keep font weight constant so selection doesn't
+            // re-flow the text width and shift the pill horizontally.
             HStack(spacing: 4) {
                 ForEach(PopoverTab.allCases) { t in
                     Button {
@@ -67,7 +72,7 @@ struct PopoverView: View {
                     } label: {
                         Label(t.rawValue, systemImage: t.systemImage)
                             .labelStyle(.titleAndIcon)
-                            .font(.system(size: 11, weight: tab == t ? .semibold : .regular))
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(tab == t ? Color.primary : Color.secondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -77,6 +82,7 @@ struct PopoverView: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .help("Show \(t.rawValue)")
                 }
                 Spacer()
             }

@@ -6,6 +6,7 @@ struct TargetRowView: View {
     @EnvironmentObject var store: AppStore
     @State private var hovering: Bool = false
     @State private var pickerOpen: Bool = false
+    @State private var logsOpen: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -18,6 +19,15 @@ struct TargetRowView: View {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             pickerOpen = false
                         }
+                    }
+                )
+            }
+            if logsOpen {
+                LogPaneView(
+                    target: target,
+                    ship: ship,
+                    onDismiss: {
+                        withAnimation(.easeInOut(duration: 0.18)) { logsOpen = false }
                     }
                 )
             }
@@ -51,19 +61,17 @@ struct TargetRowView: View {
 
             metadata
 
-            HStack(spacing: 4) {
-                if target.status == .failed {
-                    Button {
-                        openLogsInTerminal()
-                    } label: {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 10))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open logs in Terminal")
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { logsOpen.toggle() }
+                } label: {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 10))
                 }
+                .buttonStyle(.plain)
+                .help("Show logs inline")
             }
-            .opacity(hovering ? 1 : 0)
+            .opacity(hovering || logsOpen ? 1 : 0)
             .frame(width: 20, alignment: .trailing)
         }
         .padding(.vertical, 3)

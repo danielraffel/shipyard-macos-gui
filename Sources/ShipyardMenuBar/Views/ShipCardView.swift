@@ -5,6 +5,7 @@ struct ShipCardView: View {
     @EnvironmentObject var store: AppStore
     @State private var expanded: Bool = true
     @State private var hovering: Bool = false
+    @State private var addLaneOpen: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -12,6 +13,14 @@ struct ShipCardView: View {
             if expanded {
                 ForEach(ship.targets) { target in
                     TargetRowView(target: target, ship: ship)
+                }
+                if addLaneOpen {
+                    AddLaneView(
+                        ship: ship,
+                        onDismiss: {
+                            withAnimation(.easeInOut(duration: 0.18)) { addLaneOpen = false }
+                        }
+                    )
                 }
                 footer
             }
@@ -30,36 +39,44 @@ struct ShipCardView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Button { expanded.toggle() } label: {
+            // Expand/collapse zone: chevron + repo + PR + branch all toggle.
+            HStack(spacing: 8) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 12)
-            }
-            .buttonStyle(.plain)
 
-            if !ship.repo.isEmpty {
-                Text(ship.repo)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text("·").foregroundStyle(.tertiary)
-            }
+                if !ship.repo.isEmpty {
+                    Text(ship.repo)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("·").foregroundStyle(.tertiary)
+                }
 
-            Link(destination: prURL) {
-                Text("#\(ship.prNumber)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.blue)
-            }
+                // PR number is a separate link so users can still click
+                // through to GitHub without triggering the expand.
+                Link(destination: prURL) {
+                    Text("#\(ship.prNumber)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.blue)
+                }
+                .onTapGesture { /* absorbs the tap, preventing header toggle */ }
 
-            if !ship.branch.isEmpty {
-                Text(ship.branch)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+                if !ship.branch.isEmpty {
+                    Text(ship.branch)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
 
-            Spacer()
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+            }
 
             statusPill
 
@@ -72,7 +89,7 @@ struct ShipCardView: View {
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
-                .help("Dismiss")
+                .help("Dismiss this ship from the list")
                 .opacity(hovering ? 1 : 0.4)
             }
         }
@@ -91,6 +108,19 @@ struct ShipCardView: View {
                     .truncationMode(.head)
             }
             Spacer()
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { addLaneOpen.toggle() }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "plus")
+                    Text("Add lane")
+                }
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.blue)
+            }
+            .buttonStyle(.plain)
+            .help("Add a new target lane to this in-flight ship")
+
             Toggle(isOn: Binding(
                 get: { ship.autoMerge },
                 set: { _ in store.toggleAutoMerge(for: ship) }
@@ -117,20 +147,36 @@ struct ShipCardView: View {
     private var statusPill: some View {
         let label: String
         let color: Color
+        let icon: String?
         switch ship.overallStatus {
-        case .passed: label = "green"; color = ShipyardColors.green
-        case .failed: label = "failed"; color = ShipyardColors.red
-        case .running: label = "running"; color = ShipyardColors.blue
-        case .reused: label = "reused"; color = ShipyardColors.purple
-        case .skipped: label = "skipped"; color = .secondary
-        case .pending: label = "queued"; color = .secondary
+        case .passed:
+            label = "green"; color = ShipyardColors.green
+            // Merge-ready glance icon; ship.autoMerge suggests "will merge"
+            // vs "could merge". Either way a merge icon belongs here.
+            icon = "arrow.trianglehead.merge"
+        case .failed:
+            label = "failed"; color = ShipyardColors.red; icon = nil
+        case .running:
+            label = "running"; color = ShipyardColors.blue; icon = nil
+        case .reused:
+            label = "reused"; color = ShipyardColors.purple; icon = nil
+        case .skipped:
+            label = "skipped"; color = .secondary; icon = nil
+        case .pending:
+            label = "queued"; color = .secondary; icon = nil
         }
-        return Text(label)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15), in: Capsule())
+        return HStack(spacing: 3) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(color.opacity(0.15), in: Capsule())
     }
 
     private var prURL: URL {

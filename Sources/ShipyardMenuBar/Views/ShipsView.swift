@@ -63,7 +63,7 @@ struct ShipsView: View {
 
     private var headerBar: some View {
         HStack {
-            Text("\(visibleShips.count) ships in flight")
+            Text("\(visibleShips.count) active")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
             Spacer()
@@ -74,6 +74,7 @@ struct ShipsView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 11))
                 .foregroundStyle(.blue)
+                .help("Remove all passed and failed ships from the list")
             }
         }
         .padding(.vertical, 4)
@@ -103,7 +104,7 @@ struct ShipsView: View {
                 .font(.system(size: 11, weight: .medium))
                 .padding(.top, 4)
             } else {
-                Text("No ships in flight")
+                Text("Nothing in flight")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text("Run \u{201C}shipyard ship\u{201D} in a worktree to see progress here.")

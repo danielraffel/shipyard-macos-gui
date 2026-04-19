@@ -34,7 +34,9 @@ struct RunnerPickerView: View {
                 )
         )
         .padding(.leading, 22) // indent under the target row's status symbol
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        // Expand out of the row: opacity fade only, no vertical slide,
+        // so it doesn't look like it's falling from above its host row.
+        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
     }
 
     private var providerList: some View {
