@@ -6,11 +6,20 @@ final class AppStore: ObservableObject {
     @Published var ships: [Ship] = []
 
     @Published var cliBinaryPath: String = UserDefaults.standard.string(forKey: Keys.cliBinaryPath) ?? "" {
-        didSet { UserDefaults.standard.set(cliBinaryPath, forKey: Keys.cliBinaryPath); resolveCLIBinary() }
+        didSet {
+            UserDefaults.standard.set(cliBinaryPath, forKey: Keys.cliBinaryPath)
+            resolveCLIBinary()
+            restartPipelineIfPossible()
+        }
     }
 
-    @Published var cliBinaryResolved: String?
+    @Published var cliBinaryResolved: String? {
+        didSet { restartPipelineIfPossible() }
+    }
     @Published var cliBinaryError: String?
+
+    private var pipeline: ShipyardPipeline?
+    private var lastBadge: OverallBadge = .idle
 
     @Published var lastDoctorCheckedAt: Date?
     @Published var doctorResult: DoctorResult?
@@ -43,6 +52,7 @@ final class AppStore: ObservableObject {
 
     init() {
         resolveCLIBinary()
+        restartPipelineIfPossible()
     }
 
     func dismiss(ship: Ship) {
@@ -52,6 +62,65 @@ final class AppStore: ObservableObject {
 
     func clearCompleted() {
         ships.removeAll { $0.overallStatus == .passed || $0.overallStatus == .failed }
+    }
+
+    func restartPipelineIfPossible() {
+        let oldPipeline = pipeline
+        pipeline = nil
+        if let old = oldPipeline {
+            Task { await old.stop() }
+        }
+        guard let binary = cliBinaryResolved else { return }
+        let newPipeline = ShipyardPipeline(binary: binary)
+        pipeline = newPipeline
+        Task { [weak self] in
+            await newPipeline.start { [weak self] pr, event in
+                Task { @MainActor in
+                    self?.handlePipelineEvent(pr: pr, event: event)
+                }
+            }
+        }
+    }
+
+    private func handlePipelineEvent(pr: Int, event: WatchEvent?) {
+        let index = ships.firstIndex(where: { $0.prNumber == pr })
+        guard let event else {
+            // Discovery event — placeholder ship if we don't have one yet.
+            if index == nil {
+                ships.append(Ship(
+                    id: "pr-\(pr)",
+                    repo: "",
+                    prNumber: pr,
+                    branch: "",
+                    worktree: "",
+                    headSha: "",
+                    targets: []
+                ))
+            }
+            return
+        }
+        if let index {
+            if let updated = event.apply(to: ships[index]) {
+                ships[index] = updated
+            } else {
+                ships.remove(at: index)
+            }
+        } else if let created = event.apply(to: nil) {
+            ships.append(created)
+        }
+        detectBadgeTransition()
+    }
+
+    private func detectBadgeTransition() {
+        let newBadge = overallBadge
+        if newBadge != lastBadge {
+            Notifier.maybeNotify(
+                from: lastBadge,
+                to: newBadge,
+                prefs: (fail: notifyOnFail, green: notifyOnGreen, merge: notifyOnMerge)
+            )
+            lastBadge = newBadge
+        }
     }
 
     func resolveCLIBinary() {
