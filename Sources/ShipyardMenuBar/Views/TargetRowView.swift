@@ -82,14 +82,7 @@ struct TargetRowView: View {
 
     @ViewBuilder
     private func providerPill(for runner: Runner) -> some View {
-        let color: Color = {
-            switch runner.provider {
-            case .local: return .green
-            case .ssh: return .blue
-            case .github: return .purple
-            case .namespace: return .orange
-            }
-        }()
+        let color = runner.provider.tint
         HStack(spacing: 3) {
             Text(runner.provider.icon)
                 .font(.system(size: 9, weight: .bold))
@@ -108,27 +101,32 @@ struct TargetRowView: View {
                 Text("\(target.phase.rawValue) · \(target.elapsedSeconds)s")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
-                Text("last_seen=\(target.heartbeatAgeSeconds)s_ago")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(target.isStale ? Color.red : Color.secondary.opacity(0.7))
+                if target.heartbeatAgeSeconds > 0 {
+                    Text("last_seen=\(target.heartbeatAgeSeconds)s")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(target.isStale ? ShipyardColors.red : Color.secondary.opacity(0.7))
+                }
             } else if let fc = target.failureClass {
                 Text(fc.rawValue)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(fc == .infra || fc == .timeout ? .orange : .red)
+                    .foregroundStyle(fc.tint)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(fc.tint.opacity(0.15), in: Capsule())
             } else if let reused = target.reusedFrom {
                 Text("reused from \(String(reused.prefix(7)))")
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(ShipyardColors.purple)
             }
         }
     }
 
     private var symbolColor: Color {
         switch target.status {
-        case .passed: return .green
-        case .failed: return .red
-        case .running: return target.isStale ? .orange : .blue
-        case .reused: return .purple
+        case .passed: return ShipyardColors.green
+        case .failed: return ShipyardColors.red
+        case .running: return target.isStale ? ShipyardColors.orange : ShipyardColors.blue
+        case .reused: return ShipyardColors.purple
         case .skipped, .pending: return .secondary
         }
     }

@@ -118,12 +118,12 @@ struct ShipCardView: View {
         let label: String
         let color: Color
         switch ship.overallStatus {
-        case .passed: label = "green"; color = .green
-        case .failed: label = "failed"; color = .red
-        case .running: label = "running"; color = .blue
-        case .reused: label = "reused"; color = .purple
-        case .skipped: label = "skipped"; color = .gray
-        case .pending: label = "pending"; color = .gray
+        case .passed: label = "green"; color = ShipyardColors.green
+        case .failed: label = "failed"; color = ShipyardColors.red
+        case .running: label = "running"; color = ShipyardColors.blue
+        case .reused: label = "reused"; color = ShipyardColors.purple
+        case .skipped: label = "skipped"; color = .secondary
+        case .pending: label = "queued"; color = .secondary
         }
         return Text(label)
             .font(.system(size: 9, weight: .semibold))
