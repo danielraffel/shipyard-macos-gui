@@ -10,12 +10,44 @@ struct ShipsView: View {
                     emptyState
                 } else {
                     headerBar
-                    ForEach(visibleShips) { ship in
-                        ShipCardView(ship: ship)
+                    if store.groupByWorktree {
+                        groupedView
+                    } else {
+                        ForEach(visibleShips) { ship in
+                            ShipCardView(ship: ship)
+                        }
                     }
                 }
             }
             .padding(12)
+        }
+    }
+
+    private var groupedView: some View {
+        let groups = Dictionary(grouping: visibleShips) { $0.worktree.isEmpty ? "—" : $0.worktree }
+        let sortedKeys = groups.keys.sorted()
+        return ForEach(sortedKeys, id: \.self) { key in
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text(key)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    Spacer()
+                    Text("\(groups[key]?.count ?? 0)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
+                ForEach(groups[key] ?? []) { ship in
+                    ShipCardView(ship: ship)
+                }
+            }
         }
     }
 

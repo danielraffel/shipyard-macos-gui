@@ -80,7 +80,7 @@ struct ShipCardView: View {
 
     private var footer: some View {
         HStack(spacing: 6) {
-            if !ship.worktree.isEmpty {
+            if !ship.worktree.isEmpty && !store.groupByWorktree {
                 Image(systemName: "folder")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
