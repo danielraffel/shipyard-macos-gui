@@ -27,12 +27,13 @@ struct RunnerPickerView: View {
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(.quaternary.opacity(0.6))
+                .fill(Color.primary.opacity(0.04))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(.separator.opacity(0.5), lineWidth: 0.5)
+                        .strokeBorder(.separator.opacity(0.4), lineWidth: 0.5)
                 )
         )
+        .padding(.leading, 22) // indent under the target row's status symbol
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
 

@@ -95,29 +95,43 @@ struct TargetRowView: View {
         .background(color.opacity(0.15), in: Capsule())
     }
 
+    @ViewBuilder
     private var metadata: some View {
-        HStack(spacing: 8) {
-            if target.status == .running {
-                Text("\(target.phase.rawValue) · \(target.elapsedSeconds)s")
+        if target.status == .running {
+            HStack(spacing: 6) {
+                Text(target.phase.rawValue)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Text("\(target.elapsedSeconds)s")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
                 if target.heartbeatAgeSeconds > 0 {
-                    Text("last_seen=\(target.heartbeatAgeSeconds)s")
+                    Text("·")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text("\(target.heartbeatAgeSeconds)s ago")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(target.isStale ? ShipyardColors.red : Color.secondary.opacity(0.7))
                 }
-            } else if let fc = target.failureClass {
-                Text(fc.rawValue)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(fc.tint)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(fc.tint.opacity(0.15), in: Capsule())
-            } else if let reused = target.reusedFrom {
-                Text("reused from \(String(reused.prefix(7)))")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(ShipyardColors.purple)
             }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        } else if let fc = target.failureClass {
+            Text(fc.rawValue)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(fc.tint)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(fc.tint.opacity(0.15), in: Capsule())
+        } else if let reused = target.reusedFrom {
+            Text("reused \(String(reused.prefix(7)))")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(ShipyardColors.purple)
+        } else if target.advisory {
+            Text("advisory")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .italic()
         }
     }
 
