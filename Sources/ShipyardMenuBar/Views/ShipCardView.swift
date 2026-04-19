@@ -91,6 +91,17 @@ struct ShipCardView: View {
                     .truncationMode(.head)
             }
             Spacer()
+            Toggle(isOn: Binding(
+                get: { ship.autoMerge },
+                set: { _ in store.toggleAutoMerge(for: ship) }
+            )) {
+                Text("auto-merge")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .help("Merge automatically when all required lanes are green")
             if ship.overallStatus == .running {
                 Image(systemName: "clock")
                     .font(.system(size: 9))

@@ -60,6 +60,21 @@ final class AppStore: ObservableObject {
         ships[index].dismissed = true
     }
 
+    func toggleAutoMerge(for ship: Ship) {
+        guard let index = ships.firstIndex(where: { $0.id == ship.id }) else { return }
+        ships[index].autoMerge.toggle()
+        if ships[index].autoMerge, let binary = cliBinaryResolved {
+            let pr = ship.prNumber
+            // Fire-and-forget — the CLI is idempotent on re-invocation.
+            Task.detached {
+                _ = await runShipyardCapturingStdout(
+                    binary: binary,
+                    args: ["auto-merge", "\(pr)"]
+                )
+            }
+        }
+    }
+
     func clearCompleted() {
         ships.removeAll { $0.overallStatus == .passed || $0.overallStatus == .failed }
     }
