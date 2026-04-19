@@ -11,7 +11,7 @@ actor ShipyardCLIRunner {
     private var process: Process?
     private var task: Task<Void, Never>?
 
-    init(executable: String, args: [String] = ["watch", "--json", "--follow"]) {
+    init(executable: String, args: [String] = ["--json", "watch", "--follow"]) {
         self.executable = executable
         self.args = args
     }

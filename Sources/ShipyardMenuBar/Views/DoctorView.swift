@@ -69,7 +69,7 @@ struct DoctorView: View {
         guard let binary = store.cliBinaryResolved else { return }
         checking = true
         defer { checking = false }
-        let out = await runShipyard(binary: binary, args: ["doctor", "--json"])
+        let out = await runShipyard(binary: binary, args: ["--json", "doctor"])
         guard let data = out.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             store.doctorResult = DoctorResult(ok: false, checks: [:], rawJSON: out)

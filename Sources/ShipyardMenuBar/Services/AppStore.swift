@@ -88,41 +88,34 @@ final class AppStore: ObservableObject {
         guard let binary = cliBinaryResolved else { return }
         let newPipeline = ShipyardPipeline(binary: binary)
         pipeline = newPipeline
-        Task { [weak self] in
-            await newPipeline.start { [weak self] pr, event in
+        Task {
+            await newPipeline.start { [weak self] entries in
                 Task { @MainActor in
-                    self?.handlePipelineEvent(pr: pr, event: event)
+                    self?.applySnapshot(entries)
                 }
             }
         }
     }
 
-    private func handlePipelineEvent(pr: Int, event: WatchEvent?) {
-        let index = ships.firstIndex(where: { $0.prNumber == pr })
-        guard let event else {
-            // Discovery event — placeholder ship if we don't have one yet.
-            if index == nil {
-                ships.append(Ship(
-                    id: "pr-\(pr)",
-                    repo: "",
-                    prNumber: pr,
-                    branch: "",
-                    worktree: "",
-                    headSha: "",
-                    targets: []
-                ))
+    private func applySnapshot(_ entries: [ShipStateListEntry]) {
+        // Preserve per-ship UI state that the snapshot doesn't carry
+        // (dismissed, autoMerge) while replacing the rest.
+        let byPR: [Int: Ship] = Dictionary(
+            uniqueKeysWithValues: ships.map { ($0.prNumber, $0) }
+        )
+        var updated: [Ship] = []
+        for entry in entries {
+            var ship = Ship(from: entry)
+            if let existing = byPR[entry.pr] {
+                ship.dismissed = existing.dismissed
+                ship.autoMerge = existing.autoMerge
             }
-            return
+            updated.append(ship)
         }
-        if let index {
-            if let updated = event.apply(to: ships[index]) {
-                ships[index] = updated
-            } else {
-                ships.remove(at: index)
-            }
-        } else if let created = event.apply(to: nil) {
-            ships.append(created)
-        }
+        // Keep dismissed ships that have disappeared from the list visible
+        // for the session? No — if the list dropped them the CLI has
+        // archived the state; honour that.
+        ships = updated.sorted { $0.prNumber < $1.prNumber }
         detectBadgeTransition()
     }
 

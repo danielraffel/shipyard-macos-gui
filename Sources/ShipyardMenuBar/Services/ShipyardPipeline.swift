@@ -16,32 +16,20 @@ actor ShipyardPipeline {
         self.binary = binary
     }
 
-    /// Start polling for active ships and keep one watcher per PR.
-    /// `onUpdate` is called on every NDJSON event from any watcher and
-    /// is responsible for merging into UI state.
-    ///
-    /// Callback receives (pr, event). A nil event means the ship was
-    /// discovered by ship-state list and we spawned a watcher for it.
-    func start(onUpdate: @escaping @Sendable (Int, WatchEvent?) -> Void) {
+    /// Poll `shipyard ship-state list` for the authoritative ship snapshot.
+    /// That one command returns everything we need (PR, repo, branch,
+    /// dispatched_runs, evidence_snapshot) so we skip the per-PR watch
+    /// subprocesses and avoid long-lived pipes. The tradeoff is coarse
+    /// granularity (7s) vs real-time NDJSON — good enough for a
+    /// glanceable menu bar.
+    func start(onSnapshot: @escaping @Sendable ([ShipStateListEntry]) -> Void) {
         stop()
         discoveryTask = Task {
             while !Task.isCancelled {
                 if let entries = await ShipStateListPoller.fetch(binary: self.binary) {
-                    let knownPRs = Set(entries.map(\.pr))
-
-                    // Reap watchers whose ships aren't in the list anymore.
-                    for (pr, runner) in await self.snapshotWatchers() where !knownPRs.contains(pr) {
-                        await runner.stop()
-                        await self.forget(pr: pr)
-                    }
-
-                    // Spawn watchers for new PRs.
-                    for entry in entries where await !self.hasWatcher(for: entry.pr) {
-                        await self.spawnWatcher(for: entry.pr, onUpdate: onUpdate)
-                        onUpdate(entry.pr, nil)
-                    }
+                    onSnapshot(entries)
                 }
-                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s
+                try? await Task.sleep(nanoseconds: 7_000_000_000) // 7s
             }
         }
     }
@@ -51,28 +39,5 @@ actor ShipyardPipeline {
         discoveryTask = nil
         for runner in watchers.values { Task { await runner.stop() } }
         watchers.removeAll()
-    }
-
-    // MARK: - Internal
-
-    private func hasWatcher(for pr: Int) -> Bool { watchers[pr] != nil }
-    private func snapshotWatchers() -> [(Int, ShipyardCLIRunner)] { watchers.map { ($0.key, $0.value) } }
-    private func forget(pr: Int) { watchers.removeValue(forKey: pr) }
-
-    private func spawnWatcher(
-        for pr: Int,
-        onUpdate: @escaping @Sendable (Int, WatchEvent?) -> Void
-    ) async {
-        let runner = ShipyardCLIRunner(
-            executable: binary,
-            args: ["watch", "--pr", "\(pr)", "--json", "--follow"]
-        )
-        watchers[pr] = runner
-        await runner.start { line in
-            guard let data = line.data(using: .utf8) else { return }
-            if let event = try? JSONDecoder.shipyard.decode(WatchEvent.self, from: data) {
-                onUpdate(pr, event)
-            }
-        }
     }
 }
