@@ -86,8 +86,49 @@ struct ShipsView: View {
                 .font(.system(size: 44, weight: .ultraLight))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 60)
-            if store.cliBinaryResolved == nil {
-                Text("Shipyard CLI not found")
+            if store.hiddenStaleCount > 0 && store.cliBinaryResolved != nil {
+                hiddenStaleBlock
+            } else if store.cliBinaryResolved == nil {
+                cliMissingBlock
+            } else {
+                nothingInFlightBlock
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var hiddenStaleBlock: some View {
+        VStack(spacing: 4) {
+            Text("Nothing in flight")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+            Text("\(store.hiddenStaleCount) completed state\(store.hiddenStaleCount == 1 ? "" : "s") hidden by auto-clear.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+            Text("The CLI retains finished ships past the auto-clear interval. None are actively running.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+            Button {
+                store.showStale = true
+                store.restartPipelineIfPossible()
+            } label: {
+                Text("Show all \(store.hiddenStaleCount)")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .padding(.top, 6)
+            .help("Show every ship-state entry the CLI is tracking")
+        }
+    }
+
+    private var cliMissingBlock: some View {
+        VStack(spacing: 8) {
+            Text("Shipyard CLI not found")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
                 Text("This app is a companion to the Shipyard CLI. Install it, then point to the binary in Settings.")
@@ -95,34 +136,36 @@ struct ShipsView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 300)
-                Link(destination: URL(string: "https://github.com/danielraffel/Shipyard#installation")!) {
-                    HStack(spacing: 4) {
-                        Text("Install instructions")
-                        Image(systemName: "arrow.up.forward.app")
-                    }
-                }
-                .font(.system(size: 11, weight: .medium))
-                .padding(.top, 4)
-            } else {
-                Text("Nothing in flight")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text("Run \u{201C}shipyard ship\u{201D} in a worktree to see progress here.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 280)
+            Link(destination: URL(string: "https://github.com/danielraffel/Shipyard#installation")!) {
                 HStack(spacing: 4) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                    Text("Polling every 7s")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                    Text("Install instructions")
+                    Image(systemName: "arrow.up.forward.app")
                 }
-                .padding(.top, 6)
             }
+            .font(.system(size: 11, weight: .medium))
+            .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var nothingInFlightBlock: some View {
+        VStack(spacing: 4) {
+            Text("Nothing in flight")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+            Text("Run \u{201C}shipyard ship\u{201D} in a worktree to see progress here.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 280)
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Text("Polling every 7s")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.top, 6)
+        }
     }
 }

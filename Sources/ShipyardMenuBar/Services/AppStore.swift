@@ -55,6 +55,9 @@ final class AppStore: ObservableObject {
         }
     }
 
+    @Published var hiddenStaleCount: Int = 0
+    @Published var showStale: Bool = false
+
     private var pipeline: ShipyardPipeline?
     private var lastBadge: OverallBadge = .idle
 
@@ -181,6 +184,7 @@ final class AppStore: ObservableObject {
         // overall badge (any old fail → "failed"). Honor the
         // Settings → Auto-clear intervals instead.
         let now = Date()
+        var hidden = 0
         let filtered = updated.filter { ship in
             let status = ship.overallStatus
             guard status == .passed || status == .failed else { return true }
@@ -189,10 +193,14 @@ final class AppStore: ObservableObject {
                 : autoClearFailedMinutes
             if limit <= 0 { return true } // 0 / Never
             let ageMinutes = now.timeIntervalSince(ship.startedAt) / 60.0
-            return ageMinutes < Double(limit)
+            if ageMinutes < Double(limit) { return true }
+            hidden += 1
+            return false
         }
 
-        ships = filtered.sorted { $0.prNumber < $1.prNumber }
+        hiddenStaleCount = hidden
+        ships = (showStale ? updated : filtered)
+            .sorted { $0.prNumber < $1.prNumber }
         detectBadgeTransition()
     }
 
