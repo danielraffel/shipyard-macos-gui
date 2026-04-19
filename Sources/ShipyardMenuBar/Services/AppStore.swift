@@ -62,6 +62,14 @@ final class AppStore: ObservableObject {
         ships.filter { !$0.dismissed }.overallBadge
     }
 
+    /// Union of every target name that's ever shown up across ships in
+    /// this session. Used as the picker source for "Add lane" so the
+    /// user doesn't have to type common targets.
+    var knownTargetNames: [String] {
+        let names = Set(ships.flatMap { $0.targets.map(\.name) })
+        return names.sorted()
+    }
+
     init() {
         resolveCLIBinary()
         if showDemoData {
