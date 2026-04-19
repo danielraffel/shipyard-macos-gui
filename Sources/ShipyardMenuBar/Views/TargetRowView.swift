@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TargetRowView: View {
     let target: Target
+    let ship: Ship
+    @EnvironmentObject var store: AppStore
     @State private var hovering: Bool = false
 
     var body: some View {
@@ -22,9 +24,35 @@ struct TargetRowView: View {
             Spacer()
 
             metadata
+
+            // Hover actions — always occupy space so the row doesn't reflow.
+            HStack(spacing: 4) {
+                if target.status == .failed {
+                    Button {
+                        openLogsInTerminal()
+                    } label: {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open logs in Terminal")
+                }
+            }
+            .opacity(hovering ? 1 : 0)
+            .frame(width: 20, alignment: .trailing)
         }
         .padding(.vertical, 3)
         .onHover { hovering = $0 }
+    }
+
+    private func openLogsInTerminal() {
+        guard let binary = store.cliBinaryResolved else { return }
+        // Spawn Terminal.app with `shipyard logs <pr> --target <name>`.
+        let script = "tell application \"Terminal\" to do script \"\(binary) logs \(ship.prNumber) --target \(target.name); echo; echo '--- press any key to close ---'; read -n 1\""
+        let task = Process()
+        task.launchPath = "/usr/bin/osascript"
+        task.arguments = ["-e", script]
+        try? task.run()
     }
 
     @ViewBuilder
