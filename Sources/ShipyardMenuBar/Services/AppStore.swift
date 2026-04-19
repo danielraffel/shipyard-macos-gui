@@ -174,7 +174,25 @@ final class AppStore: ObservableObject {
             }
             updated.append(ship)
         }
-        ships = updated.sorted { $0.prNumber < $1.prNumber }
+
+        // Auto-clear stale terminal ships. `shipyard ship-state list`
+        // returns every state that wasn't explicitly archived, which
+        // includes ships from weeks ago. Showing those poisons the
+        // overall badge (any old fail → "failed"). Honor the
+        // Settings → Auto-clear intervals instead.
+        let now = Date()
+        let filtered = updated.filter { ship in
+            let status = ship.overallStatus
+            guard status == .passed || status == .failed else { return true }
+            let limit = status == .passed
+                ? autoClearPassedMinutes
+                : autoClearFailedMinutes
+            if limit <= 0 { return true } // 0 / Never
+            let ageMinutes = now.timeIntervalSince(ship.startedAt) / 60.0
+            return ageMinutes < Double(limit)
+        }
+
+        ships = filtered.sorted { $0.prNumber < $1.prNumber }
         detectBadgeTransition()
     }
 

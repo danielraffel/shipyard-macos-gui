@@ -107,6 +107,17 @@ struct LogPaneView: View {
             "logs", jobId,
             "--target", target.name,
         ])
-        output = out.isEmpty ? "(no output)" : out
+        if out.isEmpty {
+            output = "(no output)"
+            return
+        }
+        // Older runs get garbage-collected by the queue. Recognize the
+        // CLI's "Job X not found" as a friendlier message than raw
+        // stderr echo.
+        if out.contains("not found") {
+            output = "Logs for \(jobId) are no longer available — the queue has rolled past this run. Use `shipyard queue --json` to see what's still retained."
+        } else {
+            output = out
+        }
     }
 }
