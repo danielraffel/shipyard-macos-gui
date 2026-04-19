@@ -5,8 +5,26 @@ struct TargetRowView: View {
     let ship: Ship
     @EnvironmentObject var store: AppStore
     @State private var hovering: Bool = false
+    @State private var pickerOpen: Bool = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            row
+            if pickerOpen {
+                RunnerPickerView(
+                    target: target,
+                    ship: ship,
+                    onDismiss: {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            pickerOpen = false
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 8) {
             Text(target.status.symbol)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -18,14 +36,21 @@ struct TargetRowView: View {
                 .foregroundStyle(target.advisory ? .secondary : .primary)
 
             if let runner = target.runner {
-                providerPill(for: runner)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        pickerOpen.toggle()
+                    }
+                } label: {
+                    providerPill(for: runner)
+                }
+                .buttonStyle(.plain)
+                .help("Click to retarget")
             }
 
             Spacer()
 
             metadata
 
-            // Hover actions — always occupy space so the row doesn't reflow.
             HStack(spacing: 4) {
                 if target.status == .failed {
                     Button {

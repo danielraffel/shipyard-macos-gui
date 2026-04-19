@@ -75,6 +75,23 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Retarget one target on an in-flight ship to a new provider.
+    /// Calls `shipyard cloud retarget --pr N --target T --provider P --apply`.
+    /// Returns the CLI's stdout on success, or a best-effort error description.
+    func retarget(ship: Ship, target: Target, toProvider provider: RunnerProvider) async -> String {
+        guard let binary = cliBinaryResolved else { return "CLI not available." }
+        return await runShipyardCapturingStdout(
+            binary: binary,
+            args: [
+                "cloud", "retarget",
+                "--pr", "\(ship.prNumber)",
+                "--target", target.name,
+                "--provider", provider.rawValue,
+                "--apply",
+            ]
+        )
+    }
+
     func clearCompleted() {
         ships.removeAll { $0.overallStatus == .passed || $0.overallStatus == .failed }
     }
