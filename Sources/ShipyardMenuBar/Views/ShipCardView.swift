@@ -51,6 +51,9 @@ struct ShipCardView: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(2)
+                        .help(tooltip(for: ship))
                     Text("·").foregroundStyle(.tertiary)
                 }
 
@@ -62,6 +65,8 @@ struct ShipCardView: View {
                         .foregroundStyle(.blue)
                 }
                 .onTapGesture { /* absorbs the tap, preventing header toggle */ }
+                .help("Open PR #\(ship.prNumber) on GitHub")
+                .layoutPriority(3)
 
                 if !ship.branch.isEmpty {
                     Text(ship.branch)
@@ -69,6 +74,8 @@ struct ShipCardView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .layoutPriority(1)
+                        .help(tooltip(for: ship))
                 }
 
                 Spacer(minLength: 0)
@@ -185,6 +192,19 @@ struct ShipCardView: View {
         }
         return URL(string: "https://github.com/\(ship.repo)/pull/\(ship.prNumber)")
             ?? URL(string: "https://github.com")!
+    }
+
+    /// Full-fidelity text for tooltip on header fields. We build one
+    /// tooltip that covers repo + branch + worktree so hovering any of
+    /// them gives the complete context.
+    private func tooltip(for ship: Ship) -> String {
+        var lines: [String] = []
+        if !ship.repo.isEmpty { lines.append("Repo: \(ship.repo)") }
+        lines.append("PR: #\(ship.prNumber)")
+        if !ship.branch.isEmpty { lines.append("Branch: \(ship.branch)") }
+        if !ship.worktree.isEmpty { lines.append("Worktree: \(ship.worktree)") }
+        if !ship.headSha.isEmpty { lines.append("HEAD: \(String(ship.headSha.prefix(12)))") }
+        return lines.joined(separator: "\n")
     }
 
     private func relative(_ date: Date) -> String {
