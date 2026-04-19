@@ -6,135 +6,153 @@ struct DoctorView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Doctor")
-                        .font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    if let last = store.lastDoctorCheckedAt {
-                        Text("checked \(relative(last))")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    Button(checking ? "Checking…" : "Re-check") {
-                        Task { await runCheck() }
-                    }
-                    .disabled(checking || store.cliBinaryResolved == nil)
-                }
-
+            VStack(alignment: .leading, spacing: 14) {
+                header
                 if store.cliBinaryResolved == nil {
-                    VStack(alignment: .leading, spacing: 6) {
-                        MessageBox(
-                            icon: "exclamationmark.triangle.fill",
-                            tint: .orange,
-                            title: "Shipyard CLI not found",
-                            message: "This app is a companion — it needs the Shipyard CLI installed separately."
-                        )
-                        Link("Install instructions at github.com/danielraffel/Shipyard →",
-                             destination: URL(string: "https://github.com/danielraffel/Shipyard#installation")!)
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.leading, 8)
+                    missingCLI
+                } else if let result = store.doctorResult {
+                    ForEach(result.sections) { section in
+                        sectionView(section)
                     }
+                } else {
+                    ProgressView("Running doctor…")
+                        .controlSize(.small)
+                        .padding(.top, 20)
                 }
 
-                if let result = store.doctorResult {
-                    ForEach(result.checks.sorted(by: { $0.key < $1.key }), id: \.key) { key, ok in
-                        HStack {
-                            Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(ok ? .green : .red)
-                            Text(key)
-                                .font(.system(size: 12))
-                            Spacer()
-                        }
-                    }
-                }
-
-                Text("Checks are machine-level. Per-repo probes run via `shipyard doctor` in each worktree.")
+                Text("Machine-level checks. Per-repo probes run via \u{201C}shipyard doctor\u{201D} in each worktree.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                    .padding(.top, 8)
+                    .padding(.top, 4)
             }
-            .padding(16)
+            .padding(14)
         }
+    }
+
+    private var header: some View {
+        HStack {
+            if let result = store.doctorResult {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(result.ok ? Color.green : Color.red)
+                        .frame(width: 8, height: 8)
+                    Text(result.ok ? "Ready" : "Issues detected")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+            } else {
+                Text("Doctor")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            Spacer()
+            if let last = store.lastDoctorCheckedAt {
+                Text("checked \(relative(last))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Button {
+                Task {
+                    checking = true
+                    await store.runDoctor()
+                    checking = false
+                }
+            } label: {
+                if checking {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Text("Re-check")
+                        .font(.system(size: 11, weight: .medium))
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(checking || store.cliBinaryResolved == nil)
+        }
+    }
+
+    private var missingCLI: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Shipyard CLI not found")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("This app is a companion — it needs the Shipyard CLI installed separately.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            Link(destination: URL(string: "https://github.com/danielraffel/Shipyard#installation")!) {
+                HStack(spacing: 4) {
+                    Text("Install instructions")
+                    Image(systemName: "arrow.up.forward.app")
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .padding(.leading, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func sectionView(_ section: DoctorSection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(section.name)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            VStack(spacing: 0) {
+                ForEach(section.entries) { entry in
+                    entryRow(entry)
+                    if entry != section.entries.last {
+                        Divider().opacity(0.3)
+                    }
+                }
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.background.opacity(0.5))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(.separator.opacity(0.4), lineWidth: 0.5)
+                    )
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func entryRow(_ entry: DoctorEntry) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: entry.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(entry.ok ? .green : .red)
+                .font(.system(size: 12))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.name)
+                    .font(.system(size: 12, weight: .medium))
+                if let version = entry.version {
+                    Text(version)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                if let detail = entry.detail, !entry.ok {
+                    Text(detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                        .padding(.top, 2)
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 
     private func relative(_ date: Date) -> String {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f.localizedString(for: date, relativeTo: Date())
-    }
-
-    @MainActor
-    private func runCheck() async {
-        guard let binary = store.cliBinaryResolved else { return }
-        checking = true
-        defer { checking = false }
-        let out = await runShipyard(binary: binary, args: ["--json", "doctor"])
-        guard let data = out.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            store.doctorResult = DoctorResult(ok: false, checks: [:], rawJSON: out)
-            store.lastDoctorCheckedAt = Date()
-            return
-        }
-        var flat: [String: Bool] = [:]
-        if let checks = json["checks"] as? [String: [String: Any]] {
-            for (section, items) in checks {
-                for (name, payload) in items {
-                    if let dict = payload as? [String: Any],
-                       let ok = dict["ok"] as? Bool {
-                        flat["\(section) · \(name)"] = ok
-                    }
-                }
-            }
-        }
-        let ok = (json["ready"] as? Bool) ?? flat.values.allSatisfy { $0 }
-        store.doctorResult = DoctorResult(ok: ok, checks: flat, rawJSON: out)
-        store.lastDoctorCheckedAt = Date()
-    }
-}
-
-private func runShipyard(binary: String, args: [String]) async -> String {
-    await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
-        DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: binary)
-            process.arguments = args
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = Pipe()
-            do {
-                try process.run()
-                process.waitUntilExit()
-            } catch {
-                cont.resume(returning: "")
-                return
-            }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            cont.resume(returning: String(data: data, encoding: .utf8) ?? "")
-        }
-    }
-}
-
-struct MessageBox: View {
-    let icon: String
-    let tint: Color
-    let title: String
-    let message: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                Text(message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(10)
-        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
     }
 }

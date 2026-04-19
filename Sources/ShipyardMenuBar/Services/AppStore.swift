@@ -18,9 +18,6 @@ final class AppStore: ObservableObject {
     }
     @Published var cliBinaryError: String?
 
-    private var pipeline: ShipyardPipeline?
-    private var lastBadge: OverallBadge = .idle
-
     @Published var lastDoctorCheckedAt: Date?
     @Published var doctorResult: DoctorResult?
 
@@ -46,6 +43,9 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(groupByWorktree, forKey: Keys.groupByWorktree) }
     }
 
+    private var pipeline: ShipyardPipeline?
+    private var lastBadge: OverallBadge = .idle
+
     var overallBadge: OverallBadge {
         ships.filter { !$0.dismissed }.overallBadge
     }
@@ -53,6 +53,11 @@ final class AppStore: ObservableObject {
     init() {
         resolveCLIBinary()
         restartPipelineIfPossible()
+        // Kick off an initial doctor check so the tab isn't empty the
+        // first time the user opens it.
+        if cliBinaryResolved != nil {
+            Task { await runDoctor() }
+        }
     }
 
     func dismiss(ship: Ship) {
@@ -60,12 +65,15 @@ final class AppStore: ObservableObject {
         ships[index].dismissed = true
     }
 
+    func clearCompleted() {
+        ships.removeAll { $0.overallStatus == .passed || $0.overallStatus == .failed }
+    }
+
     func toggleAutoMerge(for ship: Ship) {
         guard let index = ships.firstIndex(where: { $0.id == ship.id }) else { return }
         ships[index].autoMerge.toggle()
         if ships[index].autoMerge, let binary = cliBinaryResolved {
             let pr = ship.prNumber
-            // Fire-and-forget — the CLI is idempotent on re-invocation.
             Task.detached {
                 _ = await runShipyardCapturingStdout(
                     binary: binary,
@@ -76,8 +84,6 @@ final class AppStore: ObservableObject {
     }
 
     /// Retarget one target on an in-flight ship to a new provider.
-    /// Calls `shipyard cloud retarget --pr N --target T --provider P --apply`.
-    /// Returns the CLI's stdout on success, or a best-effort error description.
     func retarget(ship: Ship, target: Target, toProvider provider: RunnerProvider) async -> String {
         guard let binary = cliBinaryResolved else { return "CLI not available." }
         return await runShipyardCapturingStdout(
@@ -92,8 +98,27 @@ final class AppStore: ObservableObject {
         )
     }
 
-    func clearCompleted() {
-        ships.removeAll { $0.overallStatus == .passed || $0.overallStatus == .failed }
+    func resolveCLIBinary() {
+        if !cliBinaryPath.isEmpty, FileManager.default.isExecutableFile(atPath: cliBinaryPath) {
+            cliBinaryResolved = cliBinaryPath
+            cliBinaryError = nil
+            return
+        }
+        let candidates = [
+            "/usr/local/bin/shipyard",
+            "/opt/homebrew/bin/shipyard",
+            NSHomeDirectory() + "/.pulp/bin/shipyard",
+            NSHomeDirectory() + "/.local/bin/shipyard",
+        ]
+        for candidate in candidates {
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                cliBinaryResolved = candidate
+                cliBinaryError = nil
+                return
+            }
+        }
+        cliBinaryResolved = nil
+        cliBinaryError = "shipyard binary not found. Set path in Settings or install the CLI first."
     }
 
     func restartPipelineIfPossible() {
@@ -115,8 +140,6 @@ final class AppStore: ObservableObject {
     }
 
     private func applySnapshot(_ entries: [ShipStateListEntry]) {
-        // Preserve per-ship UI state that the snapshot doesn't carry
-        // (dismissed, autoMerge) while replacing the rest.
         let byPR: [Int: Ship] = Dictionary(
             uniqueKeysWithValues: ships.map { ($0.prNumber, $0) }
         )
@@ -129,9 +152,6 @@ final class AppStore: ObservableObject {
             }
             updated.append(ship)
         }
-        // Keep dismissed ships that have disappeared from the list visible
-        // for the session? No — if the list dropped them the CLI has
-        // archived the state; honour that.
         ships = updated.sorted { $0.prNumber < $1.prNumber }
         detectBadgeTransition()
     }
@@ -148,26 +168,36 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func resolveCLIBinary() {
-        if !cliBinaryPath.isEmpty, FileManager.default.isExecutableFile(atPath: cliBinaryPath) {
-            cliBinaryResolved = cliBinaryPath
-            cliBinaryError = nil
+    // MARK: - Doctor
+
+    func runDoctor() async {
+        guard let binary = cliBinaryResolved else { return }
+        let raw = await runShipyardCapturingStdout(binary: binary, args: ["--json", "doctor"])
+        guard let data = raw.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            doctorResult = DoctorResult(ok: false, sections: [], rawJSON: raw)
+            lastDoctorCheckedAt = Date()
             return
         }
-        let candidates = [
-            "/usr/local/bin/shipyard",
-            "/opt/homebrew/bin/shipyard",
-            NSHomeDirectory() + "/.local/bin/shipyard",
-        ]
-        for candidate in candidates {
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                cliBinaryResolved = candidate
-                cliBinaryError = nil
-                return
+        var sections: [DoctorSection] = []
+        if let checks = json["checks"] as? [String: [String: Any]] {
+            for (sectionName, items) in checks.sorted(by: { $0.key < $1.key }) {
+                var entries: [DoctorEntry] = []
+                for (name, payload) in items.sorted(by: { $0.key < $1.key }) {
+                    guard let dict = payload as? [String: Any] else { continue }
+                    entries.append(DoctorEntry(
+                        name: name,
+                        ok: dict["ok"] as? Bool ?? false,
+                        version: dict["version"] as? String,
+                        detail: dict["detail"] as? String
+                    ))
+                }
+                sections.append(DoctorSection(name: sectionName, entries: entries))
             }
         }
-        cliBinaryResolved = nil
-        cliBinaryError = "shipyard binary not found. Set path in Settings or install the CLI first."
+        let ok = (json["ready"] as? Bool) ?? sections.allSatisfy { $0.entries.allSatisfy(\.ok) }
+        doctorResult = DoctorResult(ok: ok, sections: sections, rawJSON: raw)
+        lastDoctorCheckedAt = Date()
     }
 
     private enum Keys {
@@ -182,8 +212,22 @@ final class AppStore: ObservableObject {
     }
 }
 
+struct DoctorEntry: Identifiable, Equatable {
+    let name: String
+    let ok: Bool
+    let version: String?
+    let detail: String?
+    var id: String { name }
+}
+
+struct DoctorSection: Identifiable, Equatable {
+    let name: String
+    let entries: [DoctorEntry]
+    var id: String { name }
+}
+
 struct DoctorResult: Equatable {
     let ok: Bool
-    let checks: [String: Bool]
+    let sections: [DoctorSection]
     let rawJSON: String
 }
