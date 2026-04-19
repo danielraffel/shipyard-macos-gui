@@ -16,45 +16,59 @@ struct SettingsView: View {
 
     private var cliSection: some View {
         Section("Shipyard CLI") {
-            HStack {
-                TextField(
-                    "auto-detected",
-                    text: Binding(
-                        get: {
-                            // Show the actual user-set path if any,
-                            // otherwise the auto-resolved path so the
-                            // field isn't visually empty while the app
-                            // is clearly functional.
-                            store.cliBinaryPath.isEmpty
-                                ? (store.cliBinaryResolved ?? "")
-                                : store.cliBinaryPath
-                        },
-                        set: { store.cliBinaryPath = $0 }
-                    )
-                )
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11, design: .monospaced))
-                Button("Browse…", action: browse)
-                    .help("Open a file picker to locate the shipyard binary")
-                Button("Resolve", action: store.resolveCLIBinary)
-                    .help("Re-scan the default install paths")
-            }
-            if store.cliBinaryResolved != nil {
-                Label("Auto-detected — override above to point elsewhere.",
-                      systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.green)
-                    .labelStyle(.titleAndIcon)
+            // Row 1: resolved-path status (green) or error (orange).
+            if let resolved = store.cliBinaryResolved {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text(resolved)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Text(store.cliBinaryPath.isEmpty ? "auto-detected" : "overridden")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .italic()
+                }
             } else if let err = store.cliBinaryError {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
                     Text(err)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                    Spacer()
                     Link("Install →",
                          destination: URL(string: "https://github.com/danielraffel/Shipyard#installation")!)
+                        .font(.system(size: 11, weight: .medium))
                 }
-                .font(.system(size: 11))
-                .foregroundStyle(.orange)
             }
+
+            // Row 2: single-line override input + two differentiated buttons.
+            HStack(spacing: 8) {
+                TextField(
+                    "",
+                    text: $store.cliBinaryPath,
+                    prompt: Text("e.g. /opt/homebrew/bin/shipyard")
+                        .font(.system(size: 11, design: .monospaced))
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11, design: .monospaced))
+                .labelsHidden()
+
+                Button("Choose…", action: browse)
+                    .help("Open a file picker to locate the shipyard binary")
+
+                Button("Detect") { store.resolveCLIBinary() }
+                    .help("Re-scan the standard install paths (/usr/local/bin, /opt/homebrew/bin, ~/.pulp/bin, ~/.local/bin)")
+            }
+
+            Text("Leave empty to auto-detect on next launch.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
     }
 
