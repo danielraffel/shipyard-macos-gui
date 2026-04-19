@@ -48,35 +48,48 @@ struct ShipsView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             Image(systemName: "anchor")
-                .font(.system(size: 44, weight: .light))
+                .font(.system(size: 44, weight: .ultraLight))
                 .foregroundStyle(.tertiary)
-                .padding(.top, 40)
+                .padding(.top, 60)
             if store.cliBinaryResolved == nil {
                 Text("Shipyard CLI not found")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
                 Text("This app is a companion to the Shipyard CLI. Install it, then point to the binary in Settings.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 300)
-                Link("Install instructions →", destination: URL(string: "https://github.com/danielraffel/Shipyard#installation")!)
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.top, 4)
+                Link(destination: URL(string: "https://github.com/danielraffel/Shipyard#installation")!) {
+                    HStack(spacing: 4) {
+                        Text("Install instructions")
+                        Image(systemName: "arrow.up.forward.app")
+                    }
+                }
+                .font(.system(size: 11, weight: .medium))
+                .padding(.top, 4)
             } else {
                 Text("No ships in flight")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text("Run `shipyard ship` in a worktree to see progress here.")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("Run \u{201C}shipyard ship\u{201D} in a worktree to see progress here.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 280)
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Text("Polling every 7s")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.top, 6)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

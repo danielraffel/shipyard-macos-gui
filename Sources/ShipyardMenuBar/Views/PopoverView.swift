@@ -35,15 +35,21 @@ struct PopoverView: View {
     }
 
     private var headerBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 4) {
             ForEach(PopoverTab.allCases) { t in
                 Button {
-                    tab = t
+                    withAnimation(.easeInOut(duration: 0.15)) { tab = t }
                 } label: {
                     Label(t.rawValue, systemImage: t.systemImage)
                         .labelStyle(.titleAndIcon)
                         .font(.system(size: 12, weight: tab == t ? .semibold : .regular))
                         .foregroundStyle(tab == t ? Color.primary : Color.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(tab == t ? Color.primary.opacity(0.08) : .clear)
+                        )
                 }
                 .buttonStyle(.plain)
             }
@@ -56,8 +62,9 @@ struct PopoverView: View {
             }
             .buttonStyle(.plain)
             .help("Quit Shipyard")
+            .keyboardShortcut("q", modifiers: .command)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 }
