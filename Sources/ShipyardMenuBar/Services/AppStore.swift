@@ -43,6 +43,18 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(groupByWorktree, forKey: Keys.groupByWorktree) }
     }
 
+    @Published var showDemoData: Bool = UserDefaults.standard.bool(forKey: Keys.showDemoData) {
+        didSet {
+            UserDefaults.standard.set(showDemoData, forKey: Keys.showDemoData)
+            if showDemoData {
+                ships = DemoFixtures.ships
+            } else {
+                ships = []
+                restartPipelineIfPossible()
+            }
+        }
+    }
+
     private var pipeline: ShipyardPipeline?
     private var lastBadge: OverallBadge = .idle
 
@@ -52,9 +64,11 @@ final class AppStore: ObservableObject {
 
     init() {
         resolveCLIBinary()
-        restartPipelineIfPossible()
-        // Kick off an initial doctor check so the tab isn't empty the
-        // first time the user opens it.
+        if showDemoData {
+            ships = DemoFixtures.ships
+        } else {
+            restartPipelineIfPossible()
+        }
         if cliBinaryResolved != nil {
             Task { await runDoctor() }
         }
@@ -209,6 +223,7 @@ final class AppStore: ObservableObject {
         static let autoClearPassedMinutes = "autoClearPassedMinutes"
         static let autoClearFailedMinutes = "autoClearFailedMinutes"
         static let groupByWorktree = "groupByWorktree"
+        static let showDemoData = "showDemoData"
     }
 }
 

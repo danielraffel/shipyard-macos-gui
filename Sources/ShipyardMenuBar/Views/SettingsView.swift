@@ -9,6 +9,7 @@ struct SettingsView: View {
             notificationsSection
             autoClearSection
             displaySection
+            developerSection
         }
         .formStyle(.grouped)
     }
@@ -66,6 +67,15 @@ struct SettingsView: View {
         Section("Display") {
             Toggle("Group ships by worktree", isOn: $store.groupByWorktree)
             Toggle("Resume prompt on wake", isOn: $store.resumePromptOnWake)
+        }
+    }
+
+    private var developerSection: some View {
+        Section("Developer") {
+            Toggle("Show demo data", isOn: $store.showDemoData)
+            Text("Replaces live ship-state polling with fixture ships. Useful for previewing the UI without active PRs.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
     }
 
