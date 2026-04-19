@@ -1,0 +1,29 @@
+## Xcode
+*.xcodeproj/
+!project.yml
+*.xcworkspace/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+## Swift Package Manager (if ever used)
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+## macOS
+.DS_Store
+
+## Local credentials
+*.env
+.env
+.env.local
+
+## Editor
+.vscode/
+.idea/
+
+## Notarization intermediates
+*.zip
