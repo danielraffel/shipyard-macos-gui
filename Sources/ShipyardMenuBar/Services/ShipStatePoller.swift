@@ -101,6 +101,7 @@ extension Ship {
                         t.heartbeatAgeSeconds = max(0, Int(Date().timeIntervalSince(hb)))
                     }
                     t.advisory = (run.required == false)
+                    t.runId = run.runId
                     if let prov = RunnerProvider.parse(run.provider) {
                         t.runner = Runner(provider: prov, label: run.provider, detail: nil)
                     }

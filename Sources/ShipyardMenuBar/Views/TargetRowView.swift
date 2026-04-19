@@ -69,7 +69,10 @@ struct TargetRowView: View {
                         .font(.system(size: 10))
                 }
                 .buttonStyle(.plain)
-                .help("Show logs inline")
+                .disabled(target.runId == nil)
+                .help(target.runId == nil
+                      ? "Logs become available once the run has started"
+                      : "Show logs inline (shipyard logs \(target.runId ?? ""))")
             }
             .opacity(hovering || logsOpen ? 1 : 0)
             .frame(width: 20, alignment: .trailing)

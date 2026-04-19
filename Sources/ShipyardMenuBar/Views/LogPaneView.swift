@@ -81,7 +81,8 @@ struct LogPaneView: View {
 
     private func openInTerminal() {
         guard let binary = store.cliBinaryResolved else { return }
-        let script = "tell application \"Terminal\" to do script \"\(binary) logs \(ship.prNumber) --target \(target.name); echo; echo '--- press any key to close ---'; read -n 1\""
+        guard let jobId = target.runId else { return }
+        let script = "tell application \"Terminal\" to do script \"\(binary) logs \(jobId) --target \(target.name); echo; echo '--- press any key to close ---'; read -n 1\""
         let task = Process()
         task.launchPath = "/usr/bin/osascript"
         task.arguments = ["-e", script]
@@ -96,11 +97,14 @@ struct LogPaneView: View {
             output = "shipyard CLI not available."
             return
         }
-        // Use the PR number as the job ID hint. Shipyard's `logs`
-        // command takes a job ID — we don't have a direct mapping
-        // but the CLI handles PR numbers gracefully.
+        guard let jobId = target.runId else {
+            output = "No run ID recorded for this target yet. Logs are available once the run has started."
+            return
+        }
+        // `shipyard logs JOB_ID --target <name>` — the job ID is the
+        // dispatched_run.run_id from ship-state (e.g. sy-20260416-726b14).
         let out = await runShipyardCapturingStdout(binary: binary, args: [
-            "logs", "\(ship.prNumber)",
+            "logs", jobId,
             "--target", target.name,
         ])
         output = out.isEmpty ? "(no output)" : out

@@ -60,6 +60,9 @@ struct Target: Identifiable, Codable, Equatable {
     var runner: Runner?
     var advisory: Bool = false
     var reusedFrom: String?
+    /// Identifier shipyard uses for this dispatched run (e.g.
+    /// "sy-20260416-726b14"). Needed for `shipyard logs JOB_ID`.
+    var runId: String?
 
     var id: String { name }
     var isStale: Bool { status == .running && heartbeatAgeSeconds >= 90 }
