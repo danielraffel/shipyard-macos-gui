@@ -90,32 +90,32 @@ extension Ship {
             dismissed: false,
             startedAt: entry.updatedAt ?? Date()
         )
-        if let runs = entry.dispatchedRuns {
-            let targetsByName = Dictionary(
-                uniqueKeysWithValues: runs.map { run -> (String, Target) in
-                    var t = Target(name: run.target)
-                    t.status = TargetStatus.from(runStatus: run.status)
-                    t.phase = Phase(rawValue: run.phase ?? "") ?? .configure
-                    t.elapsedSeconds = run.elapsedSeconds ?? 0
-                    if let hb = run.lastHeartbeatAt {
-                        t.heartbeatAgeSeconds = max(0, Int(Date().timeIntervalSince(hb)))
-                    }
-                    t.advisory = (run.required == false)
-                    t.runId = run.runId
-                    if let prov = RunnerProvider.parse(run.provider) {
-                        t.runner = Runner(provider: prov, label: run.provider, detail: nil)
-                    }
-                    return (run.target, t)
-                }
-            )
-            var merged = targetsByName
-            for (name, status) in entry.evidenceSnapshot ?? [:] {
-                var t = merged[name] ?? Target(name: name)
-                t.status = TargetStatus.from(evidenceStatus: status)
-                merged[name] = t
+        // Build target map from dispatched_runs (full detail) + merge
+        // in evidence_snapshot (status only). Either source alone is
+        // enough to surface a row — older ship-states often carry only
+        // evidence, and that's still worth showing.
+        var merged: [String: Target] = [:]
+        for run in entry.dispatchedRuns ?? [] {
+            var t = Target(name: run.target)
+            t.status = TargetStatus.from(runStatus: run.status)
+            t.phase = Phase(rawValue: run.phase ?? "") ?? .configure
+            t.elapsedSeconds = run.elapsedSeconds ?? 0
+            if let hb = run.lastHeartbeatAt {
+                t.heartbeatAgeSeconds = max(0, Int(Date().timeIntervalSince(hb)))
             }
-            targets = merged.values.sorted { $0.name < $1.name }
+            t.advisory = (run.required == false)
+            t.runId = run.runId
+            if let prov = RunnerProvider.parse(run.provider) {
+                t.runner = Runner(provider: prov, label: run.provider, detail: nil)
+            }
+            merged[run.target] = t
         }
+        for (name, status) in entry.evidenceSnapshot ?? [:] {
+            var t = merged[name] ?? Target(name: name)
+            t.status = TargetStatus.from(evidenceStatus: status)
+            merged[name] = t
+        }
+        targets = merged.values.sorted { $0.name < $1.name }
     }
 }
 

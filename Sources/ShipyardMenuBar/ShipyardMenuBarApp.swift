@@ -1,24 +1,33 @@
 import SwiftUI
+import AppKit
 
 @main
 struct ShipyardMenuBarApp: App {
-    @StateObject private var store = AppStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    // MenuBarExtra isn't used — AppDelegate owns the NSStatusItem
+    // directly (see StatusItemController). This gives us reliable
+    // template-image tinting that MenuBarExtra's `systemImage:` path
+    // has been failing to deliver.
+    //
+    // We still declare a Settings scene so ⌘, in the main menu has
+    // somewhere to go, but we leave it empty: all real settings live
+    // in the popover's Settings tab.
     var body: some Scene {
-        // MenuBarExtra renders a template NSImage under the hood; the
-        // systemImage: initializer is the proven path for AppKit's
-        // auto-tinting (white on dark menu bar, black on light).
-        //
-        // We pass a STATIC symbol name. Dynamic symbol switching by
-        // computed property is unreliable here — macOS sometimes
-        // caches the first-resolved NSImage and later updates render
-        // as a generic black blob. Status indication lives in the
-        // popover header instead.
-        MenuBarExtra("Shipyard", systemImage: "anchor") {
-            PopoverView()
-                .environmentObject(store)
-                .frame(width: 420, height: 560)
-        }
-        .menuBarExtraStyle(.window)
+        Settings { EmptyView() }
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let store = AppStore()
+    var statusItem: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        statusItem = StatusItemController(store: store)
+    }
+
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+        true
     }
 }
