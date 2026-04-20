@@ -17,18 +17,23 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            // SF Symbol NSImages need an explicit point-size configuration
-            // to render visibly in the menu bar; otherwise they come back
-            // intrinsically zero-sized and the button shows as an empty
-            // click target.
-            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-            let image = NSImage(
+            // Two-path icon: try SF Symbol with explicit size + template;
+            // fall back to the Unicode anchor character as button title
+            // if the symbol fails to load (zero-sized or nil on this
+            // macOS build). The title path is guaranteed to render
+            // something visible.
+            if let base = NSImage(
                 systemSymbolName: "anchor",
                 accessibilityDescription: "Shipyard"
-            )?.withSymbolConfiguration(config)
-            image?.isTemplate = true // auto-tints white/black per menu bar bg
-            button.image = image
-            button.imagePosition = .imageOnly
+            ) {
+                base.size = NSSize(width: 18, height: 18)
+                base.isTemplate = true
+                button.image = base
+                button.imagePosition = .imageOnly
+            } else {
+                button.title = "\u{2693}" // ⚓
+                button.imagePosition = .noImage
+            }
             button.action = #selector(handleClick(_:))
             button.target = self
         }

@@ -82,11 +82,14 @@ struct Ship: Identifiable, Codable, Equatable {
 
     var overallStatus: TargetStatus {
         let statuses = targets.map(\.status)
+        // Empty target list = just-dispatched ship that hasn't laid down
+        // runs yet. Don't let vacuous-truth allSatisfy claim "green".
+        if statuses.isEmpty { return .pending }
         if statuses.contains(.failed) { return .failed }
+        if statuses.contains(.running) { return .running }
         if statuses.allSatisfy({ $0 == .passed || $0 == .skipped || $0 == .reused }) {
             return .passed
         }
-        if statuses.contains(.running) { return .running }
         return .pending
     }
 }
