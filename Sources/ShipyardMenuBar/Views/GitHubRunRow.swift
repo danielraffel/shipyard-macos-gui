@@ -29,6 +29,7 @@ struct GitHubRunRow: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
+                    providerPills
                 }
                 Text(relative(run.createdAt))
                     .font(.system(size: 9))
@@ -57,6 +58,43 @@ struct GitHubRunRow: View {
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .onAppear { store.fetchJobsIfNeeded(for: run) }
+    }
+
+    /// One small pill per distinct runner provider used by this run's
+    /// jobs. Shows "…" as a placeholder while we're fetching jobs; the
+    /// placeholder disappears when jobs load. Gives the user a direct
+    /// answer to "is this on namespace?" for every run.
+    @ViewBuilder
+    private var providerPills: some View {
+        if let providers = store.providers(for: run) {
+            ForEach(providers, id: \.self) { provider in
+                providerPill(for: provider)
+            }
+        } else {
+            // Still loading jobs — subtle placeholder
+            Text("…")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func providerPill(for provider: String) -> some View {
+        let color: Color = {
+            switch provider {
+            case "namespace": return ShipyardColors.orange
+            case "github-hosted": return ShipyardColors.purple
+            case "self-hosted": return ShipyardColors.blue
+            default: return .secondary
+            }
+        }()
+        return Text(provider)
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(color.opacity(0.15), in: Capsule())
+            .help("Ran on \(provider)")
     }
 
     @ViewBuilder

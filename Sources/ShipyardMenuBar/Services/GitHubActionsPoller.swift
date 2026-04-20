@@ -46,6 +46,22 @@ enum GitHubActionsPoller {
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    /// Fetch the jobs for a specific run. Used to derive runner
+    /// provider labels (namespace / github-hosted / self-hosted) so
+    /// the UI can show WHERE each workflow actually ran. Called
+    /// on-demand when a run row is rendered — cached by caller.
+    static func fetchJobs(repo: String, runId: Int64) async -> [GitHubJob]? {
+        guard let gh = resolveGH() else { return nil }
+        let raw = await runCapturingStdout(executable: gh, args: [
+            "run", "view", "\(runId)",
+            "--repo", repo,
+            "--json", "jobs",
+        ])
+        guard !raw.isEmpty, let data = raw.data(using: .utf8) else { return nil }
+        struct Envelope: Decodable { let jobs: [GitHubJob] }
+        return (try? JSONDecoder().decode(Envelope.self, from: data))?.jobs
+    }
+
     private struct RawRun: Decodable {
         let databaseId: Int64?
         let name: String?

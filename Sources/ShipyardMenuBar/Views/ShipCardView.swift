@@ -65,9 +65,9 @@ struct ShipCardView: View {
                 expanded = true
             }
         }
-        .onChange(of: expanded) { _, nowExpanded in
-            // Re-fetch on expand — user is asking to see detail, make
-            // sure the nested section is as current as possible.
+        .onChange(of: expanded) { nowExpanded in
+            // macOS 13 signature. Re-fetch on expand — user is asking
+            // to see detail, make sure the nested section is current.
             if nowExpanded {
                 store.fetchRunsForShipOnDemand(ship)
             }

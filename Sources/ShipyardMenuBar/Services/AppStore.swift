@@ -379,6 +379,39 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: - Per-run job details (runner provider)
+
+    /// Keyed by run id. Populated by fetchJobsIfNeeded and read by
+    /// views. Absence means "not fetched yet"; empty array means
+    /// "fetched, but no jobs."
+    @Published var jobsByRunId: [Int64: [GitHubJob]] = [:]
+    private var inflightJobFetches: Set<Int64> = []
+
+    func fetchJobsIfNeeded(for run: GitHubRun) {
+        guard showGitHubActions else { return }
+        if jobsByRunId[run.id] != nil { return }
+        if inflightJobFetches.contains(run.id) { return }
+        inflightJobFetches.insert(run.id)
+        let repo = run.repo
+        let id = run.id
+        Task {
+            let jobs = await GitHubActionsPoller.fetchJobs(repo: repo, runId: id) ?? []
+            await MainActor.run {
+                self.jobsByRunId[id] = jobs
+                self.inflightJobFetches.remove(id)
+            }
+        }
+    }
+
+    /// Best-effort runner-provider summary for a run: the distinct set
+    /// of providers across its jobs. Returns nil if we haven't fetched
+    /// yet; empty array if the run has no jobs (rare).
+    func providers(for run: GitHubRun) -> [String]? {
+        guard let jobs = jobsByRunId[run.id] else { return nil }
+        let uniq = Array(Set(jobs.map(\.provider))).sorted()
+        return uniq
+    }
+
     /// GitHub Actions runs that do NOT belong to any ship card. These
     /// are tag-triggered workflows (auto-release, release), scheduled
     /// workflows (post-tag-sync), direct pushes to main, or runs for
