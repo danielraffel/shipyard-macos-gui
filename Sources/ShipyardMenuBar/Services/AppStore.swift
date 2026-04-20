@@ -60,6 +60,10 @@ final class AppStore: ObservableObject {
 
     // MARK: - GitHub Actions
 
+    @Published var otherActionsExpanded: Bool = UserDefaults.standard.bool(forKey: Keys.otherActionsExpanded) {
+        didSet { UserDefaults.standard.set(otherActionsExpanded, forKey: Keys.otherActionsExpanded) }
+    }
+
     @Published var showGitHubActions: Bool = UserDefaults.standard.object(forKey: Keys.showGitHubActions) as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(showGitHubActions, forKey: Keys.showGitHubActions)
@@ -298,6 +302,11 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // Helper used by ghAction — must be at actor scope.
+    fileprivate func runGHSync(executable: String, args: [String]) async -> String {
+        await runGHCapturing(executable: executable, args: args)
+    }
+
     /// Filter + window-cutoff + blocklist + ensure this run is within
     /// the "we'd consider showing this" set. Used by both the rollup
     /// (runs inside a ship card) and the unrelated-runs section.
@@ -425,6 +434,28 @@ final class AppStore: ObservableObject {
         static let showGitHubActions = "showGitHubActions"
         static let ghWindowMinutes = "ghWindowMinutes"
         static let ghWorkflowBlocklist = "ghWorkflowBlocklist"
+        static let otherActionsExpanded = "otherActionsExpanded"
+    }
+
+    /// Cancel or rerun a GitHub Actions run via `gh run …`. Both are
+    /// fire-and-forget; the next poll will reflect the new state.
+    func cancelGitHubRun(_ run: GitHubRun) {
+        ghAction(run: run, verb: "cancel")
+    }
+    func rerunGitHubRun(_ run: GitHubRun) {
+        ghAction(run: run, verb: "rerun")
+    }
+    private func ghAction(run: GitHubRun, verb: String) {
+        guard let gh = resolveGHBinary() else { return }
+        Task.detached {
+            _ = await runGHCapturing(executable: gh, args: [
+                "run", verb, "\(run.id)", "--repo", run.repo,
+            ])
+        }
+    }
+    private func resolveGHBinary() -> String? {
+        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 }
 

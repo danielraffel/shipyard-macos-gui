@@ -10,34 +10,95 @@ struct GitHubActionsSection: View {
         let groups = store.unrelatedGitHubRuns()
         if store.showGitHubActions && !groups.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                header
-                ForEach(groups.keys.sorted(), id: \.self) { repo in
-                    repoGroup(repo: repo, runs: groups[repo] ?? [])
+                collapsibleHeader(groups: groups)
+                if store.otherActionsExpanded {
+                    ForEach(groups.keys.sorted(), id: \.self) { repo in
+                        repoGroup(repo: repo, runs: groups[repo] ?? [])
+                    }
                 }
             }
             .padding(.top, 12)
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 6) {
-                Image(systemName: "bolt.circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                Text("Other GitHub Actions runs")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                Spacer()
-                Text("last \(windowLabel)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+    private func collapsibleHeader(groups: [String: [GitHubRun]]) -> some View {
+        let counts = tallies(groups: groups)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                store.otherActionsExpanded.toggle()
             }
-            Text("Runs without a matching local ship-state — main/tag workflows, scheduled jobs, manual dispatches, and PRs you haven't shipped from this machine.")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: store.otherActionsExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+                    Image(systemName: "bolt.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Text("Other GitHub Actions runs")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                    Spacer()
+                    Text("last \(windowLabel)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                HStack(spacing: 10) {
+                    tally(label: "\(counts.running) running",
+                          color: ShipyardColors.blue,
+                          show: counts.running > 0)
+                    tally(label: "\(counts.failed) failed",
+                          color: ShipyardColors.red,
+                          show: counts.failed > 0)
+                    tally(label: "\(counts.succeeded) green",
+                          color: ShipyardColors.green,
+                          show: counts.succeeded > 0)
+                    if counts.running == 0 && counts.failed == 0 && counts.succeeded == 0 {
+                        Text("\(counts.total) run\(counts.total == 1 ? "" : "s") — click to expand")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.leading, 24)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help("Runs without a matching local ship-state — main/tag workflows, scheduled jobs, manual dispatches, and PRs you haven't shipped from this machine.")
+    }
+
+    @ViewBuilder
+    private func tally(label: String, color: Color, show: Bool) -> some View {
+        if show {
+            HStack(spacing: 3) {
+                Circle().fill(color).frame(width: 5, height: 5)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private struct Tallies {
+        var running: Int = 0
+        var failed: Int = 0
+        var succeeded: Int = 0
+        var total: Int { running + failed + succeeded }
+    }
+
+    private func tallies(groups: [String: [GitHubRun]]) -> Tallies {
+        var t = Tallies()
+        for runs in groups.values {
+            for run in runs {
+                if run.isRunning { t.running += 1 }
+                else if run.isFailure { t.failed += 1 }
+                else if run.conclusion == "success" { t.succeeded += 1 }
+            }
+        }
+        return t
     }
 
     private var windowLabel: String {
