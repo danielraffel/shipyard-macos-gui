@@ -6,12 +6,34 @@ struct SettingsView: View {
     var body: some View {
         Form {
             cliSection
+            githubSection
             notificationsSection
             autoClearSection
             displaySection
             developerSection
         }
         .formStyle(.grouped)
+    }
+
+    private var githubSection: some View {
+        Section("GitHub Actions") {
+            Toggle("Show runs from github.com", isOn: $store.showGitHubActions)
+                .help("Polls `gh run list` every 60s for each repo you've shipped from this machine")
+            Picker("Time window", selection: $store.ghWindowMinutes) {
+                Text("1 hour").tag(60)
+                Text("4 hours").tag(240)
+                Text("1 day").tag(1440)
+                Text("7 days").tag(10080)
+            }
+            .disabled(!store.showGitHubActions)
+            TextField("Hide workflows matching", text: $store.ghWorkflowBlocklist,
+                      prompt: Text("e.g. post-tag-sync, changelog"))
+                .help("Comma-separated substrings. A run is hidden when its workflow name contains any of these.")
+                .disabled(!store.showGitHubActions)
+            Text("Runs already represented by a local ship card are auto-deduplicated by head_sha.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var cliSection: some View {

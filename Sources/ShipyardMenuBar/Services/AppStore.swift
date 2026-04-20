@@ -58,6 +58,32 @@ final class AppStore: ObservableObject {
     @Published var hiddenStaleCount: Int = 0
     @Published var showStale: Bool = false
 
+    // MARK: - GitHub Actions
+
+    @Published var showGitHubActions: Bool = UserDefaults.standard.object(forKey: Keys.showGitHubActions) as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(showGitHubActions, forKey: Keys.showGitHubActions)
+            if showGitHubActions {
+                startGitHubPolling()
+            } else {
+                stopGitHubPolling()
+                githubRunsByRepo = [:]
+            }
+        }
+    }
+
+    @Published var ghWindowMinutes: Int = UserDefaults.standard.object(forKey: Keys.ghWindowMinutes) as? Int ?? 240 {
+        didSet { UserDefaults.standard.set(ghWindowMinutes, forKey: Keys.ghWindowMinutes) }
+    }
+
+    @Published var ghWorkflowBlocklist: String = UserDefaults.standard.string(forKey: Keys.ghWorkflowBlocklist) ?? "" {
+        didSet { UserDefaults.standard.set(ghWorkflowBlocklist, forKey: Keys.ghWorkflowBlocklist) }
+    }
+
+    @Published var githubRunsByRepo: [String: [GitHubRun]] = [:]
+
+    private var githubPollTask: Task<Void, Never>?
+
     private var pipeline: ShipyardPipeline?
     private var lastBadge: OverallBadge = .idle
 
@@ -82,6 +108,9 @@ final class AppStore: ObservableObject {
         }
         if cliBinaryResolved != nil {
             Task { await runDoctor() }
+        }
+        if showGitHubActions {
+            startGitHubPolling()
         }
     }
 
@@ -220,6 +249,7 @@ final class AppStore: ObservableObject {
         hiddenStaleCount = hidden
         ships = (showStale ? updated : filtered)
             .sorted { $0.prNumber < $1.prNumber }
+        knownRepos.formUnion(updated.map(\.repo).filter { !$0.isEmpty })
         detectBadgeTransition()
     }
 
@@ -233,6 +263,69 @@ final class AppStore: ObservableObject {
             )
             lastBadge = newBadge
         }
+    }
+
+    // MARK: - GitHub Actions
+
+    /// Repos we've ever seen in ship-state — the set we'll poll for
+    /// Actions runs. Grows as the user ships new repos; never shrinks
+    /// within a session.
+    private var knownRepos: Set<String> = []
+
+    func startGitHubPolling() {
+        stopGitHubPolling()
+        githubPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.pollGitHubOnce()
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s
+            }
+        }
+    }
+
+    func stopGitHubPolling() {
+        githubPollTask?.cancel()
+        githubPollTask = nil
+    }
+
+    private func pollGitHubOnce() async {
+        let repos = await MainActor.run { self.knownRepos }
+        for repo in repos {
+            if let runs = await GitHubActionsPoller.fetch(repo: repo, limit: 30) {
+                await MainActor.run {
+                    self.githubRunsByRepo[repo] = runs
+                }
+            }
+        }
+    }
+
+    /// Runs filtered by the user's window + blocklist + dedup against
+    /// ship-state. Returns a [repo: [run]] dict for rendering.
+    func visibleGitHubRuns() -> [String: [GitHubRun]] {
+        let cutoff = Date().addingTimeInterval(-Double(ghWindowMinutes) * 60)
+        let blocked = ghWorkflowBlocklist
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty }
+        // Build de-dup set from current ship cards: any (repo, head_sha)
+        // pair we already surface via ship-state.
+        let shipKeys = Set(ships.map { "\($0.repo)\t\($0.headSha)" })
+        var result: [String: [GitHubRun]] = [:]
+        for (repo, runs) in githubRunsByRepo {
+            let filtered = runs.filter { run in
+                guard run.createdAt >= cutoff else { return false }
+                let name = run.workflowName.lowercased()
+                if blocked.contains(where: { name.contains($0) }) { return false }
+                // Skip runs that share repo+sha with a ship card — the
+                // ship card already shows that state better.
+                let shipKey = "\(run.repo)\t\(run.headSha)"
+                if shipKeys.contains(shipKey) { return false }
+                return true
+            }
+            if !filtered.isEmpty {
+                result[repo] = filtered.sorted { $0.createdAt > $1.createdAt }
+            }
+        }
+        return result
     }
 
     // MARK: - Doctor
@@ -277,6 +370,9 @@ final class AppStore: ObservableObject {
         static let autoClearFailedMinutes = "autoClearFailedMinutes"
         static let groupByWorktree = "groupByWorktree"
         static let showDemoData = "showDemoData"
+        static let showGitHubActions = "showGitHubActions"
+        static let ghWindowMinutes = "ghWindowMinutes"
+        static let ghWorkflowBlocklist = "ghWorkflowBlocklist"
     }
 }
 

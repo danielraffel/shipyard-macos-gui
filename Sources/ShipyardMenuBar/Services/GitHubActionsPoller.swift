@@ -1,0 +1,115 @@
+import Foundation
+
+/// Polls `gh run list` for each repo the app has seen ship-states for.
+/// Uses the user's existing `gh` auth — no new credentials. Returns runs
+/// sorted by recency.
+enum GitHubActionsPoller {
+    /// Fetch up to `limit` recent runs for one repo. Returns nil on
+    /// `gh` auth error or repo not found — caller treats as "skip".
+    static func fetch(repo: String, limit: Int = 30) async -> [GitHubRun]? {
+        guard let gh = resolveGH() else { return nil }
+        let raw = await runCapturingStdout(
+            executable: gh,
+            args: [
+                "run", "list",
+                "--repo", repo,
+                "--limit", "\(limit)",
+                "--json",
+                "databaseId,name,headBranch,headSha,status,conclusion,url,createdAt,updatedAt",
+            ]
+        )
+        guard !raw.isEmpty, let data = raw.data(using: .utf8) else { return nil }
+        do {
+            let decoded = try JSONDecoder.gh.decode([RawRun].self, from: data)
+            return decoded.compactMap { $0.toRun(repo: repo) }
+        } catch {
+            return nil
+        }
+    }
+
+    private static func resolveGH() -> String? {
+        let candidates = [
+            "/opt/homebrew/bin/gh",
+            "/usr/local/bin/gh",
+            "/usr/bin/gh",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private struct RawRun: Decodable {
+        let databaseId: Int64?
+        let name: String?
+        let headBranch: String?
+        let headSha: String?
+        let status: String?
+        let conclusion: String?
+        let url: String?
+        let createdAt: Date?
+        let updatedAt: Date?
+
+        func toRun(repo: String) -> GitHubRun? {
+            guard let databaseId,
+                  let name,
+                  let headSha,
+                  let status,
+                  let createdAt,
+                  let updatedAt
+            else { return nil }
+            return GitHubRun(
+                id: databaseId,
+                repo: repo,
+                workflowName: name,
+                headBranch: headBranch ?? "",
+                headSha: headSha,
+                status: status,
+                conclusion: conclusion?.isEmpty == true ? nil : conclusion,
+                url: url.flatMap { URL(string: $0) },
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            )
+        }
+    }
+}
+
+private func runCapturingStdout(executable: String, args: [String]) async -> String {
+    await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = args
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                cont.resume(returning: "")
+                return
+            }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            cont.resume(returning: String(data: data, encoding: .utf8) ?? "")
+        }
+    }
+}
+
+extension JSONDecoder {
+    static let gh: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+            let fs = ISO8601DateFormatter()
+            fs.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = fs.date(from: raw) { return d }
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            if let d = plain.date(from: raw) { return d }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unparseable ISO-8601 date from gh: \(raw)"
+            )
+        }
+        return d
+    }()
+}

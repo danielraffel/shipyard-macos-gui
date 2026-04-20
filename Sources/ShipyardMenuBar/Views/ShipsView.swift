@@ -17,6 +17,7 @@ struct ShipsView: View {
                             ShipCardView(ship: ship)
                         }
                     }
+                    GitHubActionsSection()
                     scopeFooter
                 }
             }
