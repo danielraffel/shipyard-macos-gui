@@ -9,9 +9,10 @@ struct ShipCardView: View {
 
     init(ship: Ship) {
         self.ship = ship
-        // Collapse by default when there's nothing substantial to show;
-        // user can click the header to expand anyway. Reduces visual
-        // noise for the "22 queued, no runs yet" case.
+        // Default expanded when there's content: either shipyard
+        // target rows OR nested GitHub Actions runs for this PR.
+        // We can't read the store here, so we re-evaluate via
+        // .onAppear below as a safety net.
         self._expanded = State(initialValue: !ship.targets.isEmpty)
     }
 
@@ -51,6 +52,14 @@ struct ShipCardView: View {
                 )
         )
         .onHover { hovering = $0 }
+        .onAppear {
+            // If this card has nested Actions but no ship-state
+            // targets, default to expanded so the user actually sees
+            // that there's activity. Without this, cards look empty.
+            if ship.targets.isEmpty && !store.githubRuns(for: ship).isEmpty {
+                expanded = true
+            }
+        }
     }
 
     @ViewBuilder
@@ -137,6 +146,26 @@ struct ShipCardView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+            }
+
+            // Count-badge for nested GitHub Actions runs. Visible in
+            // collapsed state so users know there IS something in this
+            // card before they expand it.
+            if !expanded {
+                let ghCount = store.githubRuns(for: ship).count
+                if ghCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "bolt.circle.fill")
+                            .foregroundStyle(ShipyardColors.blue)
+                        Text("\(ghCount)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(ShipyardColors.blue)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(ShipyardColors.blue.opacity(0.12), in: Capsule())
+                    .help("\(ghCount) GitHub Actions run\(ghCount == 1 ? "" : "s") on this PR — click the card header to expand.")
+                }
             }
 
             statusPill

@@ -9,6 +9,7 @@ struct ShipsView: View {
                 if store.ships.isEmpty {
                     emptyState
                 } else {
+                    ActivitySummaryStrip()
                     headerBar
                     if store.groupByWorktree {
                         groupedView

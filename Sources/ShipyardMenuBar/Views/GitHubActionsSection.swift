@@ -25,7 +25,7 @@ struct GitHubActionsSection: View {
                 Image(systemName: "bolt.circle")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                Text("GitHub Actions — not tied to a PR")
+                Text("Other GitHub Actions runs")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
@@ -34,7 +34,7 @@ struct GitHubActionsSection: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
-            Text("Tag-triggered (release, auto-release), scheduled, or main-branch pushes.")
+            Text("Runs without a matching local ship-state — main/tag workflows, scheduled jobs, manual dispatches, and PRs you haven't shipped from this machine.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
         }
