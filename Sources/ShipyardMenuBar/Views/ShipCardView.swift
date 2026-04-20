@@ -3,16 +3,28 @@ import SwiftUI
 struct ShipCardView: View {
     let ship: Ship
     @EnvironmentObject var store: AppStore
-    @State private var expanded: Bool = true
+    @State private var expanded: Bool
     @State private var hovering: Bool = false
     @State private var addLaneOpen: Bool = false
+
+    init(ship: Ship) {
+        self.ship = ship
+        // Collapse by default when there's nothing substantial to show;
+        // user can click the header to expand anyway. Reduces visual
+        // noise for the "22 queued, no runs yet" case.
+        self._expanded = State(initialValue: !ship.targets.isEmpty)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             header
             if expanded {
-                ForEach(ship.targets) { target in
-                    TargetRowView(target: target, ship: ship)
+                if ship.targets.isEmpty {
+                    emptyTargetsRow
+                } else {
+                    ForEach(ship.targets) { target in
+                        TargetRowView(target: target, ship: ship)
+                    }
                 }
                 if addLaneOpen {
                     AddLaneView(
@@ -35,6 +47,19 @@ struct ShipCardView: View {
                 )
         )
         .onHover { hovering = $0 }
+    }
+
+    private var emptyTargetsRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Text("Waiting for dispatch — no runs yet")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.vertical, 2)
     }
 
     private var header: some View {
