@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <g fill="none" stroke="black" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Ring at the crown -->
+    <circle cx="16" cy="5.5" r="2.25"/>
+    <!-- Shank -->
+    <line x1="16" y1="7.75" x2="16" y2="26.5"/>
+    <!-- Stock (horizontal crossbar) -->
+    <line x1="10.5" y1="11" x2="21.5" y2="11"/>
+    <!-- Arm curves -->
+    <path d="M4 20.5 C 4 25.5, 10 27.5, 16 26.5"/>
+    <path d="M28 20.5 C 28 25.5, 22 27.5, 16 26.5"/>
+    <!-- Fluke tips -->
+    <line x1="2.5" y1="20" x2="5.5" y2="20"/>
+    <line x1="26.5" y1="20" x2="29.5" y2="20"/>
+  </g>
+</svg>

@@ -17,21 +17,29 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            // Two-path icon: try SF Symbol with explicit size + template;
-            // fall back to the Unicode anchor character as button title
-            // if the symbol fails to load (zero-sized or nil on this
-            // macOS build). The title path is guaranteed to render
-            // something visible.
-            if let base = NSImage(
-                systemSymbolName: "anchor",
-                accessibilityDescription: "Shipyard"
-            ) {
-                base.size = NSSize(width: 18, height: 18)
-                base.isTemplate = true
-                button.image = base
+            // Prefer the bundled SVG anchor asset (a custom drawing
+            // that reads more distinctly than the SF Symbol at menu-
+            // bar size). Fall back to the SF Symbol if for some reason
+            // the asset fails to load, then to a Unicode character.
+            let image: NSImage? = {
+                if let asset = NSImage(named: "AnchorIcon") {
+                    asset.size = NSSize(width: 18, height: 18)
+                    asset.isTemplate = true
+                    return asset
+                }
+                if let sym = NSImage(systemSymbolName: "anchor",
+                                     accessibilityDescription: "Shipyard") {
+                    sym.size = NSSize(width: 18, height: 18)
+                    sym.isTemplate = true
+                    return sym
+                }
+                return nil
+            }()
+            if let image {
+                button.image = image
                 button.imagePosition = .imageOnly
             } else {
-                button.title = "\u{2693}" // ⚓
+                button.title = "\u{2693}" // ⚓ fallback
                 button.imagePosition = .noImage
             }
             button.action = #selector(handleClick(_:))

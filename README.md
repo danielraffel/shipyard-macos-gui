@@ -53,6 +53,25 @@ chmod 600 ~/.config/shipyard-macos-gui.env
 ./scripts/notarize.sh build/ShipyardMenuBar-Release.xcarchive/Products/Applications/Shipyard.app
 ```
 
+## Distribution: DMG
+
+`scripts/package-dmg.sh` does the full pipeline end-to-end — archives
+Release, notarizes the .app, staples, builds a signed/notarized DMG
+with a drag-to-Applications layout, and stamps it with the version
+string from `project.yml`.
+
+```bash
+./scripts/package-dmg.sh            # reads version from project.yml
+./scripts/package-dmg.sh 0.2.0      # override version
+```
+
+Output: `build/Shipyard-<version>.dmg` — ready to upload to a GitHub
+release.
+
+## License
+
+[MIT](LICENSE). © 2026 Generous Corp.
+
 ## Why native (not Catalyst)
 
 - `MenuBarExtra` is pure SwiftUI on macOS 13+, backed by `NSStatusItem`.

@@ -26,19 +26,15 @@ struct ShipsView: View {
     }
 
     private var scopeFooter: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                Text("Showing local ship-state — what the CLI has dispatched from this machine.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-            Text("GitHub Actions runs triggered by push aren't tracked here. Click a PR number to see those on github.com.")
+        HStack(spacing: 4) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+            Text(store.showGitHubActions
+                 ? "Ship cards: local dispatches. Below: recent GitHub Actions for the same repos."
+                 : "Showing local ship-state only. Enable GitHub Actions in Settings to see more.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-                .padding(.leading, 14)
         }
         .padding(.top, 12)
         .padding(.horizontal, 4)
