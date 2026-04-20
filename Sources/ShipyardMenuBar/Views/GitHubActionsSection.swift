@@ -7,7 +7,7 @@ struct GitHubActionsSection: View {
     @EnvironmentObject var store: AppStore
 
     var body: some View {
-        let groups = store.visibleGitHubRuns()
+        let groups = store.unrelatedGitHubRuns()
         if store.showGitHubActions && !groups.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 header
@@ -20,16 +20,21 @@ struct GitHubActionsSection: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "bolt.circle")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-            Text("GitHub Actions")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            Spacer()
-            Text("last \(windowLabel)")
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Text("GitHub Actions — not tied to a PR")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                Text("last \(windowLabel)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            Text("Tag-triggered (release, auto-release), scheduled, or main-branch pushes.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
         }
@@ -53,7 +58,7 @@ struct GitHubActionsSection: View {
                 .foregroundStyle(.tertiary)
             VStack(spacing: 0) {
                 ForEach(runs) { run in
-                    row(run)
+                    GitHubRunRow(run: run, compact: false)
                     if run != runs.last {
                         Divider().opacity(0.3)
                     }
@@ -69,61 +74,5 @@ struct GitHubActionsSection: View {
                     )
             )
         }
-    }
-
-    @ViewBuilder
-    private func row(_ run: GitHubRun) -> some View {
-        Button {
-            if let url = run.url { NSWorkspace.shared.open(url) }
-        } label: {
-            HStack(spacing: 8) {
-                statusDot(for: run)
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(run.workflowName)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if !run.headBranch.isEmpty {
-                            Text("· \(run.headBranch)")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                    Text(relative(run.createdAt))
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                Image(systemName: "arrow.up.forward.app")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Open run on github.com\n\(run.conclusion ?? run.status)")
-    }
-
-    private func statusDot(for run: GitHubRun) -> some View {
-        let (color, symbol): (Color, String) = {
-            if run.isRunning { return (ShipyardColors.blue, "circle.fill") }
-            if run.isFailure { return (ShipyardColors.red, "xmark.circle.fill") }
-            if run.conclusion == "success" { return (ShipyardColors.green, "checkmark.circle.fill") }
-            return (.secondary, "minus.circle.fill")
-        }()
-        return Image(systemName: symbol)
-            .foregroundStyle(color)
-            .font(.system(size: 11))
-    }
-
-    private func relative(_ date: Date) -> String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .short
-        return f.localizedString(for: date, relativeTo: Date())
     }
 }

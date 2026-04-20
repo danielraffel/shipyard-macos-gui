@@ -26,6 +26,10 @@ struct ShipCardView: View {
                         TargetRowView(target: target, ship: ship)
                     }
                 }
+                let ghRuns = store.githubRuns(for: ship)
+                if !ghRuns.isEmpty {
+                    nestedGitHubRuns(ghRuns)
+                }
                 if addLaneOpen {
                     AddLaneView(
                         ship: ship,
@@ -49,14 +53,39 @@ struct ShipCardView: View {
         .onHover { hovering = $0 }
     }
 
+    @ViewBuilder
+    private func nestedGitHubRuns(_ runs: [GitHubRun]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: "bolt.circle")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                Text("GitHub Actions on this PR")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+            }
+            .padding(.top, 6)
+            ForEach(runs) { run in
+                GitHubRunRow(run: run, compact: true)
+            }
+        }
+    }
+
     private var emptyTargetsRow: some View {
         HStack(spacing: 6) {
             Image(systemName: "clock")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-            Text("Waiting for dispatch — no runs yet")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("No runs dispatched")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text("`shipyard ship` recorded this state but never dispatched targets. Likely an interrupted or aborted run — archive to remove.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(3)
+            }
             Spacer()
         }
         .padding(.vertical, 2)
@@ -188,8 +217,6 @@ struct ShipCardView: View {
         switch ship.overallStatus {
         case .passed:
             label = "green"; color = ShipyardColors.green
-            // Merge-ready glance icon; ship.autoMerge suggests "will merge"
-            // vs "could merge". Either way a merge icon belongs here.
             icon = "arrow.trianglehead.merge"
         case .failed:
             label = "failed"; color = ShipyardColors.red; icon = nil
@@ -200,7 +227,13 @@ struct ShipCardView: View {
         case .skipped:
             label = "skipped"; color = .secondary; icon = nil
         case .pending:
-            label = "queued"; color = .secondary; icon = nil
+            // Distinguish "queued with targets declared, waiting to run"
+            // from "no targets dispatched at all" (orphaned state).
+            if ship.targets.isEmpty {
+                label = "no runs"; color = .secondary; icon = nil
+            } else {
+                label = "queued"; color = .secondary; icon = nil
+            }
         }
         return HStack(spacing: 3) {
             if let icon {

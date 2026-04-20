@@ -298,27 +298,74 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// Runs filtered by the user's window + blocklist + dedup against
-    /// ship-state. Returns a [repo: [run]] dict for rendering.
-    func visibleGitHubRuns() -> [String: [GitHubRun]] {
-        let cutoff = Date().addingTimeInterval(-Double(ghWindowMinutes) * 60)
-        let blocked = ghWorkflowBlocklist
+    /// Filter + window-cutoff + blocklist + ensure this run is within
+    /// the "we'd consider showing this" set. Used by both the rollup
+    /// (runs inside a ship card) and the unrelated-runs section.
+    private func eligibleRun(_ run: GitHubRun, blocked: [String], cutoff: Date) -> Bool {
+        guard run.createdAt >= cutoff else { return false }
+        let name = run.workflowName.lowercased()
+        if blocked.contains(where: { name.contains($0) }) { return false }
+        return true
+    }
+
+    private func currentBlocklist() -> [String] {
+        ghWorkflowBlocklist
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
             .filter { !$0.isEmpty }
-        // Build de-dup set from current ship cards: any (repo, head_sha)
-        // pair we already surface via ship-state.
-        let shipKeys = Set(ships.map { "\($0.repo)\t\($0.headSha)" })
+    }
+
+    private func currentCutoff() -> Date {
+        Date().addingTimeInterval(-Double(ghWindowMinutes) * 60)
+    }
+
+    /// GitHub Actions runs that are explicitly tied to a specific
+    /// ship. Match by head_sha (exact) OR head_branch (same branch
+    /// even if the local ship-state hasn't caught up to the latest
+    /// push). Used to nest Actions runs INSIDE a ship card.
+    func githubRuns(for ship: Ship) -> [GitHubRun] {
+        guard showGitHubActions,
+              let runs = githubRunsByRepo[ship.repo]
+        else { return [] }
+        let blocked = currentBlocklist()
+        let cutoff = currentCutoff()
+        return runs.filter { run in
+            guard eligibleRun(run, blocked: blocked, cutoff: cutoff) else { return false }
+            let branchMatch = !ship.branch.isEmpty && run.headBranch == ship.branch
+            let shaMatch = !ship.headSha.isEmpty && run.headSha == ship.headSha
+            return branchMatch || shaMatch
+        }.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// GitHub Actions runs that do NOT belong to any ship card. These
+    /// are tag-triggered workflows (auto-release, release), scheduled
+    /// workflows (post-tag-sync), direct pushes to main, or runs for
+    /// PRs we don't have local ship-state for. Shown in the "GitHub
+    /// Actions" section below the ship cards.
+    func unrelatedGitHubRuns() -> [String: [GitHubRun]] {
+        let blocked = currentBlocklist()
+        let cutoff = currentCutoff()
+        // Set of (repo, branch) and (repo, sha) tuples already owned
+        // by a ship card. If a run matches either, it's owned and
+        // doesn't belong here.
+        var ownedBranches: Set<String> = []
+        var ownedShas: Set<String> = []
+        for ship in ships where !ship.dismissed {
+            if !ship.branch.isEmpty {
+                ownedBranches.insert("\(ship.repo)\t\(ship.branch)")
+            }
+            if !ship.headSha.isEmpty {
+                ownedShas.insert("\(ship.repo)\t\(ship.headSha)")
+            }
+        }
         var result: [String: [GitHubRun]] = [:]
         for (repo, runs) in githubRunsByRepo {
             let filtered = runs.filter { run in
-                guard run.createdAt >= cutoff else { return false }
-                let name = run.workflowName.lowercased()
-                if blocked.contains(where: { name.contains($0) }) { return false }
-                // Skip runs that share repo+sha with a ship card — the
-                // ship card already shows that state better.
-                let shipKey = "\(run.repo)\t\(run.headSha)"
-                if shipKeys.contains(shipKey) { return false }
+                guard eligibleRun(run, blocked: blocked, cutoff: cutoff) else { return false }
+                let branchKey = "\(run.repo)\t\(run.headBranch)"
+                let shaKey = "\(run.repo)\t\(run.headSha)"
+                if ownedBranches.contains(branchKey) { return false }
+                if ownedShas.contains(shaKey) { return false }
                 return true
             }
             if !filtered.isEmpty {
@@ -326,6 +373,11 @@ final class AppStore: ObservableObject {
             }
         }
         return result
+    }
+
+    /// Back-compat alias; older callers referenced this name.
+    func visibleGitHubRuns() -> [String: [GitHubRun]] {
+        unrelatedGitHubRuns()
     }
 
     // MARK: - Doctor

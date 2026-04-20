@@ -79,10 +79,17 @@ struct ShipsView: View {
     }
 
     private var headerBar: some View {
-        HStack {
-            Text("\(visibleShips.count) active")
-                .font(.system(size: 11, weight: .medium))
+        HStack(spacing: 6) {
+            Image(systemName: "shippingbox")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Text("Local ship-states")
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Text("· \(visibleShips.count)")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
             Spacer()
             if completedCount > 0 {
                 Button("Clear \(completedCount) completed") {
