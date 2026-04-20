@@ -90,6 +90,25 @@ final class AppStore: ObservableObject {
         ships[index].dismissed = true
     }
 
+    /// Archive the underlying ship-state file via the CLI. Use this when
+    /// the user wants a stale entry truly gone, not just hidden locally.
+    /// Idempotent — CLI returns success even if the state was already
+    /// archived.
+    func archive(ship: Ship) {
+        guard let binary = cliBinaryResolved else {
+            dismiss(ship: ship)
+            return
+        }
+        let pr = ship.prNumber
+        Task.detached {
+            _ = await runShipyardCapturingStdout(
+                binary: binary,
+                args: ["ship-state", "discard", "\(pr)"]
+            )
+        }
+        dismiss(ship: ship)
+    }
+
     func clearCompleted() {
         ships.removeAll { $0.overallStatus == .passed || $0.overallStatus == .failed }
     }

@@ -112,16 +112,21 @@ struct ShipCardView: View {
 
             statusPill
 
-            if ship.overallStatus == .passed || ship.overallStatus == .failed {
+            // Archive button — available for any terminal or empty-runs
+            // ship. Calls `shipyard ship-state discard <pr>` under the
+            // hood so the CLI forgets the state too, not just the UI.
+            if ship.overallStatus == .passed
+               || ship.overallStatus == .failed
+               || ship.targets.isEmpty {
                 Button {
-                    store.dismiss(ship: ship)
+                    store.archive(ship: ship)
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
+                    Image(systemName: "archivebox.fill")
                         .foregroundStyle(.tertiary)
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
-                .help("Dismiss this ship from the list")
+                .help("Archive this ship-state (calls `shipyard ship-state discard \(ship.prNumber)`)")
                 .opacity(hovering ? 1 : 0.4)
             }
         }

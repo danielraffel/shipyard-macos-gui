@@ -17,10 +17,30 @@ struct ShipsView: View {
                             ShipCardView(ship: ship)
                         }
                     }
+                    scopeFooter
                 }
             }
             .padding(12)
         }
+    }
+
+    private var scopeFooter: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                Text("Showing local ship-state — what the CLI has dispatched from this machine.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            Text("GitHub Actions runs triggered by push aren't tracked here. Click a PR number to see those on github.com.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .padding(.leading, 14)
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 4)
     }
 
     private var groupedView: some View {
