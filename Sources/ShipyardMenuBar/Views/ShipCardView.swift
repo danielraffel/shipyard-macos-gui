@@ -53,11 +53,23 @@ struct ShipCardView: View {
         )
         .onHover { hovering = $0 }
         .onAppear {
+            // Kick off a branch-scoped gh run list so we pick up
+            // runs for this PR even if they're outside the repo-wide
+            // top-100 slice (common for older PRs in fast-moving
+            // repos like pulp).
+            store.fetchRunsForShipOnDemand(ship)
             // If this card has nested Actions but no ship-state
             // targets, default to expanded so the user actually sees
             // that there's activity. Without this, cards look empty.
             if ship.targets.isEmpty && !store.githubRuns(for: ship).isEmpty {
                 expanded = true
+            }
+        }
+        .onChange(of: expanded) { _, nowExpanded in
+            // Re-fetch on expand — user is asking to see detail, make
+            // sure the nested section is as current as possible.
+            if nowExpanded {
+                store.fetchRunsForShipOnDemand(ship)
             }
         }
     }
@@ -83,14 +95,14 @@ struct ShipCardView: View {
 
     private var emptyTargetsRow: some View {
         HStack(spacing: 6) {
-            Image(systemName: "clock")
+            Image(systemName: "info.circle")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             VStack(alignment: .leading, spacing: 1) {
-                Text("No runs dispatched")
+                Text("Shipyard didn't dispatch anything")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                Text("`shipyard ship` recorded this state but never dispatched targets. Likely an interrupted or aborted run — archive to remove.")
+                Text("`shipyard ship` recorded this ship-state but its dispatched_runs is empty. GitHub may still have run CI for this branch — see below.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .lineLimit(3)
@@ -259,7 +271,7 @@ struct ShipCardView: View {
             // Distinguish "queued with targets declared, waiting to run"
             // from "no targets dispatched at all" (orphaned state).
             if ship.targets.isEmpty {
-                label = "no runs"; color = .secondary; icon = nil
+                label = "not dispatched"; color = .secondary; icon = nil
             } else {
                 label = "queued"; color = .secondary; icon = nil
             }

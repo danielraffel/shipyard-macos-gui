@@ -6,18 +6,28 @@ import Foundation
 enum GitHubActionsPoller {
     /// Fetch up to `limit` recent runs for one repo. Returns nil on
     /// `gh` auth error or repo not found — caller treats as "skip".
-    static func fetch(repo: String, limit: Int = 30) async -> [GitHubRun]? {
+    static func fetch(repo: String, limit: Int = 100) async -> [GitHubRun]? {
+        await fetch(repo: repo, branch: nil, limit: limit)
+    }
+
+    /// Branch-scoped fetch — used when expanding a ship card so we
+    /// pick up runs for that branch even if they're outside the
+    /// repo-wide top-100 window. pulp-scale repos burn through 100
+    /// recent runs quickly; narrowing to a branch keeps old PRs
+    /// visible.
+    static func fetch(repo: String, branch: String?, limit: Int = 100) async -> [GitHubRun]? {
         guard let gh = resolveGH() else { return nil }
-        let raw = await runCapturingStdout(
-            executable: gh,
-            args: [
-                "run", "list",
-                "--repo", repo,
-                "--limit", "\(limit)",
-                "--json",
-                "databaseId,name,headBranch,headSha,status,conclusion,url,createdAt,updatedAt",
-            ]
-        )
+        var args = [
+            "run", "list",
+            "--repo", repo,
+            "--limit", "\(limit)",
+            "--json",
+            "databaseId,name,headBranch,headSha,status,conclusion,url,createdAt,updatedAt",
+        ]
+        if let branch, !branch.isEmpty {
+            args.insert(contentsOf: ["--branch", branch], at: 2)
+        }
+        let raw = await runCapturingStdout(executable: gh, args: args)
         guard !raw.isEmpty, let data = raw.data(using: .utf8) else { return nil }
         do {
             let decoded = try JSONDecoder.gh.decode([RawRun].self, from: data)

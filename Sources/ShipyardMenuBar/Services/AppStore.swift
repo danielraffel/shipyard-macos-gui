@@ -85,6 +85,9 @@ final class AppStore: ObservableObject {
     }
 
     @Published var githubRunsByRepo: [String: [GitHubRun]] = [:]
+    /// Per-branch cache keyed by "repo\tbranch". Populated on card-
+    /// expand so even old PR branches surface real runs.
+    @Published var githubRunsByBranch: [String: [GitHubRun]] = [:]
 
     private var githubPollTask: Task<Void, Never>?
 
@@ -329,21 +332,51 @@ final class AppStore: ObservableObject {
     }
 
     /// GitHub Actions runs that are explicitly tied to a specific
-    /// ship. Match by head_sha (exact) OR head_branch (same branch
-    /// even if the local ship-state hasn't caught up to the latest
-    /// push). Used to nest Actions runs INSIDE a ship card.
+    /// ship. Union of two data sources: repo-wide cache (fast,
+    /// covers newest runs) and branch-scoped cache (populated on
+    /// expand, catches older branches outside the repo-wide slice).
+    /// Match by head_sha (exact) OR head_branch.
     func githubRuns(for ship: Ship) -> [GitHubRun] {
-        guard showGitHubActions,
-              let runs = githubRunsByRepo[ship.repo]
-        else { return [] }
+        guard showGitHubActions else { return [] }
         let blocked = currentBlocklist()
         let cutoff = currentCutoff()
-        return runs.filter { run in
-            guard eligibleRun(run, blocked: blocked, cutoff: cutoff) else { return false }
-            let branchMatch = !ship.branch.isEmpty && run.headBranch == ship.branch
-            let shaMatch = !ship.headSha.isEmpty && run.headSha == ship.headSha
-            return branchMatch || shaMatch
-        }.sorted { $0.createdAt > $1.createdAt }
+        var seen: Set<Int64> = []
+        var result: [GitHubRun] = []
+        let sources: [[GitHubRun]] = [
+            githubRunsByRepo[ship.repo] ?? [],
+            githubRunsByBranch["\(ship.repo)\t\(ship.branch)"] ?? [],
+        ]
+        for source in sources {
+            for run in source where eligibleRun(run, blocked: blocked, cutoff: cutoff) {
+                let branchMatch = !ship.branch.isEmpty && run.headBranch == ship.branch
+                let shaMatch = !ship.headSha.isEmpty && run.headSha == ship.headSha
+                guard branchMatch || shaMatch else { continue }
+                if seen.insert(run.id).inserted {
+                    result.append(run)
+                }
+            }
+        }
+        return result.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// Triggered by ShipCardView when the card becomes expanded.
+    /// Fetches `gh run list --branch <ship.branch>` to backfill runs
+    /// that may be outside the repo-wide top-100 window.
+    func fetchRunsForShipOnDemand(_ ship: Ship) {
+        guard showGitHubActions,
+              !ship.repo.isEmpty,
+              !ship.branch.isEmpty else { return }
+        let repo = ship.repo
+        let branch = ship.branch
+        Task {
+            if let runs = await GitHubActionsPoller.fetch(
+                repo: repo, branch: branch, limit: 50
+            ) {
+                await MainActor.run {
+                    self.githubRunsByBranch["\(repo)\t\(branch)"] = runs
+                }
+            }
+        }
     }
 
     /// GitHub Actions runs that do NOT belong to any ship card. These
