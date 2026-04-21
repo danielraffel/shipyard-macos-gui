@@ -162,6 +162,25 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Canonical platform names currently represented on a ship —
+    /// either as a shipyard dispatched target OR as a GitHub Actions
+    /// matrix job. Used by Add Lane to filter "New targets" to
+    /// platforms NOT already running, and populate the "Parallel on
+    /// existing" section with platforms that ARE running.
+    func currentPlatformNames(for ship: Ship) -> [String] {
+        var keys: Set<String> = []
+        for t in ship.targets {
+            if let k = Self.canonicalKey(for: t.name) { keys.insert(k) }
+        }
+        for run in githubRuns(for: ship) {
+            for job in jobsByRunId[run.id] ?? [] {
+                if let k = Self.canonicalKey(for: job.name) { keys.insert(k) }
+            }
+        }
+        let order = ["macos", "linux", "windows", "ios", "android", "tvos", "watchos"]
+        return order.filter(keys.contains).map(Self.canonicalDisplayName)
+    }
+
     /// Dedupe bare platform names (e.g. "linux") when a more
     /// specific candidate exists (e.g. "Linux (x64)"). Keeps the
     /// specific one; drops the bare one. Prevents the picker from

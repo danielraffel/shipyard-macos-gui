@@ -48,16 +48,22 @@ struct AddLaneView: View {
 
     // MARK: - Step 1: target
 
+    /// Platforms already running on this ship — either via shipyard
+    /// dispatch OR GitHub Actions. These appear as "Parallel runner
+    /// on existing" rows (user wants to add a SECOND runner for an
+    /// already-running platform) and are filtered out of "New
+    /// targets" (can't add what's already there).
     private var existingTargets: [String] {
-        ship.targets.map(\.name).sorted()
+        store.currentPlatformNames(for: ship)
     }
 
-    /// Candidates include both shipyard target names across all ships
-    /// AND GitHub Actions matrix job names for this PR (so pulp's
-    /// "Windows (x64)", "macOS (ARM64)", etc. appear here).
+    /// Candidates minus what's already represented. For a fully
+    /// triple-platformed pulp PR, this will be empty — meaning the
+    /// picker shows only "Parallel on existing" + Custom fallback.
     private var newTargets: [String] {
-        store.candidateTargetNames(for: ship)
-            .filter { !existingTargets.contains($0) }
+        let existing = Set(existingTargets)
+        return store.candidateTargetNames(for: ship)
+            .filter { !existing.contains($0) }
     }
 
     private var targetPicker: some View {
