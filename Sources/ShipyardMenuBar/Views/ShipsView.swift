@@ -93,7 +93,7 @@ struct ShipsView: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-            Text("Active PRs")
+            Text("Tracked PRs")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)

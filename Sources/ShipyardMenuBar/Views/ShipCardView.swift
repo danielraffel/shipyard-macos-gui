@@ -12,13 +12,14 @@ struct ShipCardView: View {
     /// recycling doesn't re-open cards the user had collapsed once
     /// they scroll off-screen and back.
     ///
-    /// Default is collapsed by default. If the user opts into
-    /// `autoExpandActivePRs` in Settings, cards with activity
-    /// (shipyard targets OR GH runs) default to expanded instead.
+    /// Default is collapsed. If the user opts into
+    /// `autoExpandActivePRs` in Settings, any card that actually has
+    /// content to show defaults to expanded — `hasExpandableContent`
+    /// checks the unfiltered run caches, so a long-merged PR whose
+    /// runs are older than the GH time window still expands.
     private var expanded: Bool {
-        let hasActivity = !ship.targets.isEmpty
-            || !store.githubRuns(for: ship).isEmpty
-        let defaultIfUnset = store.autoExpandActivePRs && hasActivity
+        let defaultIfUnset = store.autoExpandActivePRs
+            && store.hasExpandableContent(for: ship)
         return store.isExpanded(pr: ship.prNumber, defaultIfUnset: defaultIfUnset)
     }
 

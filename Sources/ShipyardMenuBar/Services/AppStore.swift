@@ -44,10 +44,29 @@ final class AppStore: ObservableObject {
     }
 
     /// Opt-in: when true, a ship card opens by default if it has any
-    /// activity (shipyard targets OR recent GH runs). Off by default —
-    /// the predictable "all collapsed" layout is the baseline.
+    /// content to show (shipyard targets OR cached GH runs on the
+    /// ship's branch/SHA). Off by default — the predictable "all
+    /// collapsed" layout is the baseline.
     @Published var autoExpandActivePRs: Bool = UserDefaults.standard.bool(forKey: Keys.autoExpandActivePRs) {
         didSet { UserDefaults.standard.set(autoExpandActivePRs, forKey: Keys.autoExpandActivePRs) }
+    }
+
+    /// Does this ship have anything worth expanding? Used by the
+    /// auto-expand default. Uses the un-windowed run caches so a
+    /// merged PR whose runs are older than the GH time window still
+    /// counts as "has content" — this isn't the polling-eligibility
+    /// check, it's the "does expanding reveal anything" check.
+    func hasExpandableContent(for ship: Ship) -> Bool {
+        if !ship.targets.isEmpty { return true }
+        let branchKey = "\(ship.repo)\t\(ship.branch)"
+        let repoRuns = githubRunsByRepo[ship.repo] ?? []
+        let branchRuns = githubRunsByBranch[branchKey] ?? []
+        for run in repoRuns + branchRuns {
+            let branchMatch = !ship.branch.isEmpty && run.headBranch == ship.branch
+            let shaMatch = !ship.headSha.isEmpty && run.headSha == ship.headSha
+            if branchMatch || shaMatch { return true }
+        }
+        return false
     }
 
     @Published var showDemoData: Bool = UserDefaults.standard.bool(forKey: Keys.showDemoData) {
@@ -555,15 +574,26 @@ final class AppStore: ObservableObject {
         // returns every state that wasn't explicitly archived, which
         // includes ships from weeks ago. Showing those poisons the
         // overall badge (any old fail → "failed"). Honor the
-        // Settings → Auto-clear intervals instead.
+        // Settings → Auto-clear intervals.
+        //
+        // "Terminal" includes: overallStatus == .passed / .failed OR
+        // PR state is merged / closed. Ships with empty targets (and
+        // therefore .pending status) would otherwise never age out
+        // even when their PR merged long ago — the merged signal from
+        // PR state catches them.
         let now = Date()
         var hidden = 0
         let filtered = updated.filter { ship in
             let status = ship.overallStatus
-            guard status == .passed || status == .failed else { return true }
-            let limit = status == .passed
-                ? autoClearPassedMinutes
-                : autoClearFailedMinutes
+            let pr = prState(for: ship)
+            let isTerminalByStatus = status == .passed || status == .failed
+            let isTerminalByPR = pr?.isClosed == true
+            guard isTerminalByStatus || isTerminalByPR else { return true }
+            // Merged/closed follows the "passed" TTL; genuine
+            // shipyard failures follow the failed TTL.
+            let limit = (status == .failed && pr?.isMerged != true)
+                ? autoClearFailedMinutes
+                : autoClearPassedMinutes
             if limit <= 0 { return true } // 0 / Never
             let ageMinutes = now.timeIntervalSince(ship.startedAt) / 60.0
             if ageMinutes < Double(limit) { return true }

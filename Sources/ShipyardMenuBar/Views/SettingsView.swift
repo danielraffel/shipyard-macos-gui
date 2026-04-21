@@ -219,8 +219,8 @@ struct SettingsView: View {
     private var displaySection: some View {
         Section("Display") {
             Toggle("Group ships by worktree", isOn: $store.groupByWorktree)
-            Toggle("Auto-expand active PRs", isOn: $store.autoExpandActivePRs)
-            Text("When on, PRs with shipyard targets or recent GitHub Actions runs open by default. Your manual expand/collapse choices are always respected.")
+            Toggle("Auto-expand PRs with content", isOn: $store.autoExpandActivePRs)
+            Text("When on, PRs with shipyard targets or any cached GitHub Actions runs open by default. Your manual expand/collapse choices are always respected.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Toggle("Resume prompt on wake", isOn: $store.resumePromptOnWake)
