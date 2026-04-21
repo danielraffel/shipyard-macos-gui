@@ -69,9 +69,32 @@ final class AppStore: ObservableObject {
     /// state.
     @Published var expandAllTick: Int = 0
     @Published var expandAllState: Bool = true
+
+    /// Per-PR expansion state. Survives LazyVStack view recycling —
+    /// without this, cards scrolled off-screen were re-initialized
+    /// from their init default on scroll-back, so a "Collapse all"
+    /// issued while only some cards were on-screen would silently
+    /// get un-done for the off-screen cards once they came back.
+    @Published var prExpansionState: [Int: Bool] = [:]
+
+    /// Returns the stored expansion for this PR, falling back to a
+    /// caller-supplied default when no explicit state has been set.
+    func isExpanded(pr: Int, defaultIfUnset: Bool) -> Bool {
+        prExpansionState[pr] ?? defaultIfUnset
+    }
+
+    func setExpanded(_ value: Bool, for pr: Int) {
+        prExpansionState[pr] = value
+    }
+
     func setAllExpanded(_ expanded: Bool) {
         expandAllState = expanded
         expandAllTick += 1
+        // Write through for every known PR so off-screen cards stay
+        // in sync with the global choice when scrolled back into view.
+        for ship in ships {
+            prExpansionState[ship.prNumber] = expanded
+        }
     }
 
     @Published var showGitHubActions: Bool = UserDefaults.standard.object(forKey: Keys.showGitHubActions) as? Bool ?? true {

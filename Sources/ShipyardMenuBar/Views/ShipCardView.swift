@@ -3,19 +3,23 @@ import SwiftUI
 struct ShipCardView: View {
     let ship: Ship
     @EnvironmentObject var store: AppStore
-    @State private var expanded: Bool
     @State private var hovering: Bool = false
     @State private var addLaneOpen: Bool = false
     @State private var otherChecksExpanded: Bool = false
     @State private var showingArchiveConfirm: Bool = false
 
-    init(ship: Ship) {
-        self.ship = ship
-        // Default expanded when there's content: either shipyard
-        // target rows OR nested GitHub Actions runs for this PR.
-        // We can't read the store here, so .onAppear re-syncs both
-        // expand-all state and the "has activity" signal.
-        self._expanded = State(initialValue: !ship.targets.isEmpty)
+    /// Expansion lives in the store, not in @State, so LazyVStack
+    /// recycling doesn't re-open cards the user had collapsed once
+    /// they scroll off-screen and back.
+    private var expanded: Bool {
+        store.isExpanded(
+            pr: ship.prNumber,
+            defaultIfUnset: !ship.targets.isEmpty || !store.githubRuns(for: ship).isEmpty
+        )
+    }
+
+    private func setExpanded(_ value: Bool) {
+        store.setExpanded(value, for: ship.prNumber)
     }
 
     var body: some View {
@@ -70,21 +74,6 @@ struct ShipCardView: View {
             for run in store.githubRuns(for: ship) {
                 store.fetchJobsIfNeeded(for: run)
             }
-            if store.expandAllTick > 0 {
-                expanded = store.expandAllState
-            } else if ship.targets.isEmpty && !store.githubRuns(for: ship).isEmpty {
-                expanded = true
-            }
-        }
-        .onChange(of: expanded) { nowExpanded in
-            // macOS 13 signature. Re-fetch on expand — user is asking
-            // to see detail, make sure the nested section is current.
-            if nowExpanded {
-                store.fetchRunsForShipOnDemand(ship)
-            }
-        }
-        .onChange(of: store.expandAllTick) { _ in
-            expanded = store.expandAllState
         }
     }
 
@@ -363,7 +352,13 @@ struct ShipCardView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+                let next = !expanded
+                withAnimation(.easeInOut(duration: 0.15)) { setExpanded(next) }
+                if next {
+                    // Re-fetch on expand — user is asking to see
+                    // detail, make sure the nested section is current.
+                    store.fetchRunsForShipOnDemand(ship)
+                }
             }
 
             // Per-platform status dots (macOS, Linux, Windows, iOS,
