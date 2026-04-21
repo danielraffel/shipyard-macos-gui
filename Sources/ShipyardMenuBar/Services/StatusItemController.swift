@@ -17,31 +17,20 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            // Prefer the bundled SVG anchor asset (a custom drawing
-            // that reads more distinctly than the SF Symbol at menu-
-            // bar size). Fall back to the SF Symbol if for some reason
-            // the asset fails to load, then to a Unicode character.
-            let image: NSImage? = {
-                if let asset = NSImage(named: "AnchorIcon") {
-                    asset.size = NSSize(width: 18, height: 18)
-                    asset.isTemplate = true
-                    return asset
-                }
-                if let sym = NSImage(systemSymbolName: "anchor",
-                                     accessibilityDescription: "Shipyard") {
-                    sym.size = NSSize(width: 18, height: 18)
-                    sym.isTemplate = true
-                    return sym
-                }
-                return nil
-            }()
-            if let image {
-                button.image = image
-                button.imagePosition = .imageOnly
-            } else {
-                button.title = "\u{2693}" // ⚓ fallback
-                button.imagePosition = .noImage
-            }
+            // SF Symbol "anchor" is the reliable path — it's
+            // guaranteed to load, guaranteed to template-tint (white
+            // on dark menu bar, black on light). We dropped the
+            // custom SVG asset and Unicode fallback because both
+            // were failing on this macOS build and the Unicode
+            // character falls through as a full-color emoji which
+            // looks nothing like the rest of the menu bar.
+            let image = NSImage(
+                systemSymbolName: "anchor",
+                accessibilityDescription: "Shipyard"
+            )
+            image?.isTemplate = true
+            button.image = image
+            button.imagePosition = .imageOnly
             button.action = #selector(handleClick(_:))
             button.target = self
         }
