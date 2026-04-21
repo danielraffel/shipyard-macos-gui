@@ -236,14 +236,24 @@ struct ShipsView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 280)
             HStack(spacing: 4) {
-                Image(systemName: "sparkles")
+                Image(systemName: cadenceIcon)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                Text("Polling every 7s")
+                Text(cadenceLabel)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
             .padding(.top, 6)
         }
+    }
+
+    private var cadenceIcon: String {
+        if case .live = store.liveStatus { return "dot.radiowaves.left.and.right" }
+        return "arrow.clockwise"
+    }
+
+    private var cadenceLabel: String {
+        if case .live = store.liveStatus { return "Live via Tailscale Funnel" }
+        return "Polling every 60s"
     }
 }
