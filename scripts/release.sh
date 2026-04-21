@@ -48,11 +48,14 @@ if [ -z "$TAG" ]; then
   echo "Create one first:  git tag v1.0.0 && git push --tags" >&2
   exit 1
 fi
-if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "ERROR: Tag '$TAG' doesn't match v<X.Y.Z>" >&2
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+  echo "ERROR: Tag '$TAG' doesn't match v<X.Y.Z>[-<prerelease>]" >&2
   exit 1
 fi
-VERSION="${TAG#v}"
+# Strip any pre-release suffix before version-match checks so a
+# dry-run tag like v0.0.0-dryrun still maps to project.yml's 0.0.0.
+RAW="${TAG#v}"
+VERSION="${RAW%%-*}"
 
 # Honor a trailing --draft flag to create a draft release (useful for
 # dry-runs). Shift past the tag arg if present.
