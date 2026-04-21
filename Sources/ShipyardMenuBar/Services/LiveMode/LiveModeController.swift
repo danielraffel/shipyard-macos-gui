@@ -17,6 +17,12 @@ final class LiveModeController {
     private var boundPort: UInt16?
     private var tailscaleBinary: String?
     private var tunnelURL: URL?
+    /// Port the daemon is currently funneling — set after a successful
+    /// `TunnelController.start`. Paired with `boundPort` to decide
+    /// whether a reconcile needs to re-touch the tunnel. Without this
+    /// every 60s watcher tick would `funnel reset` + re-add, creating
+    /// brief drop windows where webhooks fail.
+    private var configuredFunnelPort: UInt16?
     private var lastProbe: TailscaleStatus?
     private var registered: [String: Int64] = [:] // repo → hookId
     private var lastEventAt: Date?
@@ -85,8 +91,20 @@ final class LiveModeController {
         do {
             let port = try ensureServerRunning(handleEvent: handleEvent)
             if let binary = tailscale.binaryPath {
-                try await TunnelController.start(binaryPath: binary, port: port)
-                tailscaleBinary = binary
+                // Only (re)touch the Tailscale daemon when something
+                // actually changed — i.e. first reconcile, binary
+                // changed, or the local port differs from what the
+                // daemon is currently funneling. A watcher-driven
+                // reconcile with no state change must be a no-op so
+                // we don't strobe `funnel reset` + `--bg` every 60s.
+                let needsTunnelRestart =
+                    configuredFunnelPort != port
+                    || tailscaleBinary != binary
+                if needsTunnelRestart {
+                    try await TunnelController.start(binaryPath: binary, port: port)
+                    tailscaleBinary = binary
+                    configuredFunnelPort = port
+                }
             }
             if let url = tailscale.funnelURL {
                 tunnelURL = url
@@ -208,6 +226,7 @@ final class LiveModeController {
         boundPort = nil
         tunnelURL = nil
         tailscaleBinary = nil
+        configuredFunnelPort = nil
         // Intentionally DO NOT unregister hooks here — we keep them
         // so a subsequent enable doesn't double-create. Hooks get
         // cleaned up explicitly by `unregisterAll`.
