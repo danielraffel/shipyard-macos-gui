@@ -63,6 +63,13 @@ struct Target: Identifiable, Codable, Equatable {
     /// Identifier shipyard uses for this dispatched run (e.g.
     /// "sy-20260416-726b14"). Needed for `shipyard logs JOB_ID`.
     var runId: String?
+    /// When this Target is synthesized from a GitHub Actions matrix
+    /// job (not a shipyard dispatched_run), these carry the GH run
+    /// id + repo so LogPaneView can fall back to `gh run view --log`
+    /// for content instead of asking `shipyard logs` which has no
+    /// record of GH runs.
+    var githubRunId: Int64?
+    var githubRepo: String?
 
     var id: String { name }
     var isStale: Bool { status == .running && heartbeatAgeSeconds >= 90 }

@@ -63,10 +63,12 @@ struct ShipCardView: View {
             // render. These populate data the rest of the card reads.
             store.fetchRunsForShipOnDemand(ship)
             store.fetchPRStateIfNeeded(for: ship)
-            // Honour the user's most-recent expand-all / collapse-all
-            // action if they pressed it BEFORE this card scrolled into
-            // view (LazyVStack defers creation, so .onChange wouldn't
-            // fire for off-screen cards).
+            // Proactively fetch jobs for every nested run so platform
+            // lanes populate without waiting for "Other checks" to
+            // be expanded.
+            for run in store.githubRuns(for: ship) {
+                store.fetchJobsIfNeeded(for: run)
+            }
             if store.expandAllTick > 0 {
                 expanded = store.expandAllState
             } else if ship.targets.isEmpty && !store.githubRuns(for: ship).isEmpty {
@@ -183,8 +185,7 @@ struct ShipCardView: View {
         struct LaneData {
             var statuses: [TargetStatus] = []
             var provider: String? = nil
-            var runId: String? = nil
-            var canonicalName: String? = nil
+            var githubRunId: Int64? = nil
         }
         var byPlatform: [String: LaneData] = [:]
         for run in store.githubRuns(for: ship) {
@@ -193,27 +194,40 @@ struct ShipCardView: View {
                 var d = byPlatform[key] ?? LaneData()
                 d.statuses.append(Self.mapJobStatus(job))
                 if job.provider != "unknown" { d.provider = job.provider }
-                // Prefer the more descriptive job name (e.g. "macOS
-                // (ARM64)" over "macos") as the canonical lane name.
-                let clean = job.name.replacingOccurrences(of: " \\[[^]]+\\]", with: "", options: .regularExpression)
-                if d.canonicalName == nil || clean.count > (d.canonicalName?.count ?? 0) {
-                    d.canonicalName = clean
-                }
-                if d.runId == nil { d.runId = String(job.databaseId) }
+                // Keep the most recent job's ID — that's what a user
+                // is most likely to want logs or retarget for.
+                if d.githubRunId == nil { d.githubRunId = run.id }
                 byPlatform[key] = d
             }
         }
         let order = ["macos", "linux", "windows", "ios", "android", "tvos", "watchos"]
         return order.compactMap { key -> Target? in
             guard let d = byPlatform[key] else { return nil }
-            var t = Target(name: d.canonicalName ?? key.capitalized)
+            // Use clean canonical platform names. The user's point:
+            // "Coverage report (Linux, Clang)" is a terrible platform
+            // label. "Linux" is clearer.
+            var t = Target(name: Self.canonicalPlatformName(key))
             t.status = Self.aggregateStatus(d.statuses)
             if let prov = d.provider,
                let provEnum = RunnerProvider(rawValue: prov == "github-hosted" ? "github" : prov) {
                 t.runner = Runner(provider: provEnum, label: prov, detail: nil)
             }
-            t.runId = d.runId
+            t.githubRunId = d.githubRunId
+            t.githubRepo = ship.repo
             return t
+        }
+    }
+
+    private static func canonicalPlatformName(_ key: String) -> String {
+        switch key {
+        case "macos":   return "macOS"
+        case "linux":   return "Linux"
+        case "windows": return "Windows"
+        case "ios":     return "iOS"
+        case "android": return "Android"
+        case "tvos":    return "tvOS"
+        case "watchos": return "watchOS"
+        default:        return key.capitalized
         }
     }
 

@@ -80,6 +80,15 @@ struct LogPaneView: View {
     }
 
     private func openInTerminal() {
+        if let ghRunId = target.githubRunId, let repo = target.githubRepo {
+            // GitHub-sourced: `gh run view <id> --log` in Terminal.
+            let script = "tell application \"Terminal\" to do script \"gh run view \(ghRunId) --repo \(repo) --log; echo; echo '--- press any key to close ---'; read -n 1\""
+            let task = Process()
+            task.launchPath = "/usr/bin/osascript"
+            task.arguments = ["-e", script]
+            try? task.run()
+            return
+        }
         guard let binary = store.cliBinaryResolved else { return }
         guard let jobId = target.runId else { return }
         let script = "tell application \"Terminal\" to do script \"\(binary) logs \(jobId) --target \(target.name); echo; echo '--- press any key to close ---'; read -n 1\""
@@ -93,6 +102,25 @@ struct LogPaneView: View {
     private func load() async {
         loading = true
         defer { loading = false }
+        // Route based on target source — GitHub-backed targets go
+        // through `gh run view --log`, shipyard-native go through
+        // `shipyard logs`.
+        if let ghRunId = target.githubRunId, let repo = target.githubRepo {
+            let raw = await runGHCapturing(
+                executable: resolveGH() ?? "/opt/homebrew/bin/gh",
+                args: ["run", "view", "\(ghRunId)", "--repo", repo, "--log"]
+            )
+            if raw.isEmpty {
+                output = "No log content returned by gh. The run may have expired or the job isn't complete yet."
+            } else {
+                // gh's --log is big; only keep the tail for the
+                // inline pane. "Open in Terminal" is the power path.
+                let lines = raw.split(separator: "\n", omittingEmptySubsequences: false)
+                let tail = lines.suffix(200).joined(separator: "\n")
+                output = tail
+            }
+            return
+        }
         guard let binary = store.cliBinaryResolved else {
             output = "shipyard CLI not available."
             return
@@ -101,8 +129,6 @@ struct LogPaneView: View {
             output = "No run ID recorded for this target yet. Logs are available once the run has started."
             return
         }
-        // `shipyard logs JOB_ID --target <name>` — the job ID is the
-        // dispatched_run.run_id from ship-state (e.g. sy-20260416-726b14).
         let out = await runShipyardCapturingStdout(binary: binary, args: [
             "logs", jobId,
             "--target", target.name,
@@ -111,13 +137,15 @@ struct LogPaneView: View {
             output = "(no output)"
             return
         }
-        // Older runs get garbage-collected by the queue. Recognize the
-        // CLI's "Job X not found" as a friendlier message than raw
-        // stderr echo.
         if out.contains("not found") {
             output = "Logs for \(jobId) are no longer available — the queue has rolled past this run. Use `shipyard queue --json` to see what's still retained."
         } else {
             output = out
         }
+    }
+
+    private func resolveGH() -> String? {
+        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 }

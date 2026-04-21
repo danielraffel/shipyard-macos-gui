@@ -17,18 +17,23 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            // Use squareLength (22pt) instead of variableLength so
-            // the button has a concrete frame even before the image
-            // arrives. Apply an explicit SymbolConfiguration point
-            // size — some macOS builds return a zero-sized image
-            // from systemSymbolName without one.
+            // Per user request: use "arrow.trianglehead.merge" for
+            // now. SF Symbol "anchor" was rendering invisibly on
+            // this macOS build for reasons I couldn't diagnose.
+            // merge-arrow is visible + on-theme (we're a CI tool).
             let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-            let image = NSImage(
-                systemSymbolName: "anchor",
-                accessibilityDescription: "Shipyard"
-            )?.withSymbolConfiguration(config)
-            image?.isTemplate = true
-            image?.size = NSSize(width: 18, height: 18)
+            let candidates = ["arrow.trianglehead.merge", "arrow.triangle.merge", "anchor"]
+            var image: NSImage?
+            for name in candidates {
+                if let img = NSImage(systemSymbolName: name,
+                                     accessibilityDescription: "Shipyard")?
+                    .withSymbolConfiguration(config) {
+                    img.isTemplate = true
+                    img.size = NSSize(width: 18, height: 18)
+                    image = img
+                    break
+                }
+            }
             button.image = image
             button.title = ""
             button.imagePosition = .imageOnly
