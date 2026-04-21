@@ -63,13 +63,36 @@ struct ShipsView: View {
     }
 
     private func bannerDetail(for rl: GitHubRateLimit) -> String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .short
-        let when = f.localizedString(for: rl.resetAt, relativeTo: Date())
+        // Hand-rolled rather than RelativeDateTimeFormatter — the
+        // latter yields "in 20 min." with a trailing period that
+        // collides with our sentence-ending period ("20 min..").
+        let relative = relativeBannerTime(until: rl.resetAt)
+        let absolute = absoluteBannerTime(rl.resetAt)
         if rl.isExceeded {
-            return "Polling paused until reset \(when). Live webhook updates still working. App will catch up automatically — no need to quit."
+            return "Polling paused until reset \(relative) at \(absolute). Live webhook updates still working. App will catch up automatically — no need to quit."
         }
-        return "\(rl.remaining) of \(rl.limit) calls left. Resets \(when)."
+        return "\(rl.remaining) of \(rl.limit) calls left. Resets \(relative) at \(absolute)."
+    }
+
+    private func relativeBannerTime(until date: Date) -> String {
+        let seconds = Int(max(0, date.timeIntervalSinceNow))
+        if seconds < 60 { return "in \(seconds) sec" }
+        let minutes = (seconds + 30) / 60
+        if minutes < 60 { return "in \(minutes) min" }
+        let hours = Double(minutes) / 60.0
+        if hours < 2 { return String(format: "in %.1f hr", hours) }
+        return "in \(Int(hours)) hr"
+    }
+
+    private static let bannerTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f
+    }()
+
+    private func absoluteBannerTime(_ date: Date) -> String {
+        Self.bannerTimeFormatter.string(from: date)
     }
 
     private var scopeFooter: some View {
