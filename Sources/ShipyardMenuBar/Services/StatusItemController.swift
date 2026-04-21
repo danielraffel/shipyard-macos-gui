@@ -15,18 +15,20 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         self.store = store
         super.init()
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            // SF Symbol "anchor" is the baseline path — guaranteed to
-            // render, guaranteed to template-tint. The custom Noun
-            // Project SVG asset was loading but rendering as empty
-            // (xcodegen + Xcode 26 asset-catalog quirk). Falling
-            // back to SF Symbol keeps the icon visible.
+            // Use squareLength (22pt) instead of variableLength so
+            // the button has a concrete frame even before the image
+            // arrives. Apply an explicit SymbolConfiguration point
+            // size — some macOS builds return a zero-sized image
+            // from systemSymbolName without one.
+            let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
             let image = NSImage(
                 systemSymbolName: "anchor",
                 accessibilityDescription: "Shipyard"
-            )
+            )?.withSymbolConfiguration(config)
             image?.isTemplate = true
+            image?.size = NSSize(width: 18, height: 18)
             button.image = image
             button.title = ""
             button.imagePosition = .imageOnly

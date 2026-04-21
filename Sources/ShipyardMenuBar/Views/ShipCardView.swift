@@ -6,6 +6,7 @@ struct ShipCardView: View {
     @State private var expanded: Bool
     @State private var hovering: Bool = false
     @State private var addLaneOpen: Bool = false
+    @State private var otherChecksExpanded: Bool = false
 
     init(ship: Ship) {
         self.ship = ship
@@ -20,16 +21,21 @@ struct ShipCardView: View {
         VStack(alignment: .leading, spacing: 6) {
             header
             if expanded {
-                if ship.targets.isEmpty {
-                    emptyTargetsRow
-                } else {
-                    ForEach(ship.targets) { target in
+                let platforms = effectivePlatformTargets()
+                if !platforms.isEmpty {
+                    // Primary: platform-specific lanes at the top.
+                    // These are what the user actually cares about —
+                    // "did my macOS / Linux / Windows / iOS runners
+                    // pass?"
+                    ForEach(platforms) { target in
                         TargetRowView(target: target, ship: ship)
                     }
+                } else if ship.targets.isEmpty {
+                    emptyTargetsRow
                 }
-                let ghRuns = store.githubRuns(for: ship)
-                if !ghRuns.isEmpty {
-                    nestedGitHubRuns(ghRuns)
+                let otherRuns = otherWorkflowRuns()
+                if !otherRuns.isEmpty {
+                    collapsibleOtherChecks(otherRuns)
                 }
                 if addLaneOpen {
                     AddLaneView(
@@ -79,23 +85,145 @@ struct ShipCardView: View {
         }
     }
 
-    @ViewBuilder
-    private func nestedGitHubRuns(_ runs: [GitHubRun]) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Image(systemName: "bolt.circle")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                Text("GitHub Actions on this PR")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .textCase(.uppercase)
+    /// Workflow runs that are NOT the source of any platform lane —
+    /// so the user doesn't see the same matrix jobs twice (once up
+    /// top as platforms, once nested inside "Build and Test"). Also
+    /// filters out workflows we've already represented at the top.
+    private func otherWorkflowRuns() -> [GitHubRun] {
+        let all = store.githubRuns(for: ship)
+        return all.filter { run in
+            let jobs = store.jobsByRunId[run.id] ?? []
+            // If every job in this workflow is a platform job, it's
+            // fully represented by the top section — skip it here.
+            if !jobs.isEmpty, jobs.allSatisfy({ Self.platformKey($0.name) != nil }) {
+                return false
             }
-            .padding(.top, 6)
-            ForEach(runs) { run in
-                GitHubRunRow(run: run, compact: true, ship: ship)
+            return true
+        }
+    }
+
+    @ViewBuilder
+    private func collapsibleOtherChecks(_ runs: [GitHubRun]) -> some View {
+        let tallies = countRuns(runs)
+        VStack(alignment: .leading, spacing: 3) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    otherChecksExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: otherChecksExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+                    Image(systemName: "bolt.circle")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text("Other checks")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .textCase(.uppercase)
+                    Text("· \(runs.count)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    if !otherChecksExpanded {
+                        Spacer()
+                        // Micro-summary: counts of each status.
+                        if tallies.running > 0 {
+                            Circle().fill(ShipyardColors.blue).frame(width: 5, height: 5)
+                            Text("\(tallies.running)")
+                                .font(.system(size: 9)).foregroundStyle(.secondary)
+                        }
+                        if tallies.failed > 0 {
+                            Circle().fill(ShipyardColors.red).frame(width: 5, height: 5)
+                            Text("\(tallies.failed)")
+                                .font(.system(size: 9)).foregroundStyle(.secondary)
+                        }
+                        if tallies.succeeded > 0 {
+                            Circle().fill(ShipyardColors.green).frame(width: 5, height: 5)
+                            Text("\(tallies.succeeded)")
+                                .font(.system(size: 9)).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Spacer()
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Pipeline workflows that aren't tied to a specific platform — click to expand")
+
+            if otherChecksExpanded {
+                ForEach(runs) { run in
+                    GitHubRunRow(run: run, compact: true, ship: ship)
+                }
             }
         }
+        .padding(.top, 6)
+    }
+
+    private func countRuns(_ runs: [GitHubRun]) -> (running: Int, failed: Int, succeeded: Int) {
+        var r = (running: 0, failed: 0, succeeded: 0)
+        for run in runs {
+            if run.isRunning { r.running += 1 }
+            else if run.isFailure { r.failed += 1 }
+            else if run.conclusion == "success" { r.succeeded += 1 }
+        }
+        return r
+    }
+
+    /// Synthesize platform-level Target rows. If shipyard dispatched
+    /// native targets, use those (richest data, supports retarget on
+    /// the runner pill). Otherwise derive one Target per platform
+    /// from nested GitHub Actions matrix jobs — so the user sees
+    /// their macOS / Linux / Windows runners at the top even when
+    /// shipyard hands off to GH Actions.
+    private func effectivePlatformTargets() -> [Target] {
+        if !ship.targets.isEmpty { return ship.targets }
+        struct LaneData {
+            var statuses: [TargetStatus] = []
+            var provider: String? = nil
+            var runId: String? = nil
+            var canonicalName: String? = nil
+        }
+        var byPlatform: [String: LaneData] = [:]
+        for run in store.githubRuns(for: ship) {
+            for job in store.jobsByRunId[run.id] ?? [] {
+                guard let key = Self.platformKey(job.name) else { continue }
+                var d = byPlatform[key] ?? LaneData()
+                d.statuses.append(Self.mapJobStatus(job))
+                if job.provider != "unknown" { d.provider = job.provider }
+                // Prefer the more descriptive job name (e.g. "macOS
+                // (ARM64)" over "macos") as the canonical lane name.
+                let clean = job.name.replacingOccurrences(of: " \\[[^]]+\\]", with: "", options: .regularExpression)
+                if d.canonicalName == nil || clean.count > (d.canonicalName?.count ?? 0) {
+                    d.canonicalName = clean
+                }
+                if d.runId == nil { d.runId = String(job.databaseId) }
+                byPlatform[key] = d
+            }
+        }
+        let order = ["macos", "linux", "windows", "ios", "android", "tvos", "watchos"]
+        return order.compactMap { key -> Target? in
+            guard let d = byPlatform[key] else { return nil }
+            var t = Target(name: d.canonicalName ?? key.capitalized)
+            t.status = Self.aggregateStatus(d.statuses)
+            if let prov = d.provider,
+               let provEnum = RunnerProvider(rawValue: prov == "github-hosted" ? "github" : prov) {
+                t.runner = Runner(provider: provEnum, label: prov, detail: nil)
+            }
+            t.runId = d.runId
+            return t
+        }
+    }
+
+    private static func aggregateStatus(_ statuses: [TargetStatus]) -> TargetStatus {
+        if statuses.contains(.failed) { return .failed }
+        if statuses.contains(.running) { return .running }
+        if statuses.allSatisfy({ $0 == .passed || $0 == .skipped || $0 == .reused }) {
+            return .passed
+        }
+        return .pending
     }
 
     private var emptyTargetsRow: some View {
