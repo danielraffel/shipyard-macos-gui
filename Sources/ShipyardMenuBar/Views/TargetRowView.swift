@@ -69,16 +69,24 @@ struct TargetRowView: View {
                         .font(.system(size: 10))
                 }
                 .buttonStyle(.plain)
-                .disabled(target.runId == nil)
-                .help(target.runId == nil
-                      ? "Logs become available once the run has started"
-                      : "Show logs inline (shipyard logs \(target.runId ?? ""))")
+                .disabled(target.runId == nil && target.githubRunId == nil)
+                .help(logsTooltip)
             }
             .opacity(hovering || logsOpen ? 1 : 0)
             .frame(width: 20, alignment: .trailing)
         }
         .padding(.vertical, 3)
         .onHover { hovering = $0 }
+    }
+
+    private var logsTooltip: String {
+        if let gh = target.githubRunId {
+            return "Show logs inline (gh run view \(gh) --log)"
+        }
+        if let rid = target.runId {
+            return "Show logs inline (shipyard logs \(rid))"
+        }
+        return "Logs become available once the run has started"
     }
 
     private func openLogsInTerminal() {
@@ -109,24 +117,33 @@ struct TargetRowView: View {
     @ViewBuilder
     private var metadata: some View {
         if target.status == .running {
-            HStack(spacing: 6) {
-                Text(target.phase.rawValue)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Text("\(target.elapsedSeconds)s")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                if target.heartbeatAgeSeconds > 0 {
-                    Text("·")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                    Text("\(target.heartbeatAgeSeconds)s ago")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(target.isStale ? ShipyardColors.red : Color.secondary.opacity(0.7))
+            // Only surface phase/elapsed when we actually have data
+            // (shipyard-dispatched targets). GH-derived synthesized
+            // lanes don't carry phase info, so we'd end up rendering
+            // misleading "configure 0s" — omit the whole block
+            // instead.
+            if target.elapsedSeconds > 0 || target.heartbeatAgeSeconds > 0 {
+                HStack(spacing: 6) {
+                    if target.elapsedSeconds > 0 {
+                        Text(target.phase.rawValue)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Text("\(target.elapsedSeconds)s")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    if target.heartbeatAgeSeconds > 0 {
+                        Text("·")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                        Text("\(target.heartbeatAgeSeconds)s ago")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(target.isStale ? ShipyardColors.red : Color.secondary.opacity(0.7))
+                    }
                 }
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
         } else if let fc = target.failureClass {
             Text(fc.rawValue)
                 .font(.system(size: 9, weight: .bold, design: .monospaced))

@@ -117,23 +117,49 @@ final class AppStore: ObservableObject {
     }
 
     /// Candidate target names for a specific ship's Add Lane picker.
-    /// Filtered to platform-like targets — names that mention a known
-    /// OS or CPU arch — so the user doesn't see every pipeline sub-
-    /// job like "Enforce version & skill sync" or "yamllint + …".
-    /// Matches the prototype's curated list.
+    /// Returns canonical OS names (macOS, Linux, Windows, etc.) —
+    /// one entry per unique platform the user could dispatch to.
+    /// Matches the prototype's short, curated list instead of
+    /// flooding with every matrix-job name.
     func candidateTargetNames(for ship: Ship) -> [String] {
-        var names = Set(knownTargetNames.filter(Self.looksLikePlatformTarget))
+        var platformsSeen: Set<String> = []
+        for name in knownTargetNames {
+            if let key = Self.canonicalKey(for: name) { platformsSeen.insert(key) }
+        }
         for run in githubRuns(for: ship) {
             for job in jobsByRunId[run.id] ?? [] {
-                var n = job.name
-                if let br = n.range(of: " [") { n = String(n[..<br.lowerBound]) }
-                n = n.trimmingCharacters(in: .whitespaces)
-                if !n.isEmpty, Self.looksLikePlatformTarget(n) {
-                    names.insert(n)
-                }
+                if let key = Self.canonicalKey(for: job.name) { platformsSeen.insert(key) }
             }
         }
-        return Self.dedupePlatformNames(Array(names)).sorted()
+        let canonicalOrder = ["macos", "linux", "windows", "ios", "android", "tvos", "watchos"]
+        return canonicalOrder
+            .filter { platformsSeen.contains($0) }
+            .map(Self.canonicalDisplayName)
+    }
+
+    private static func canonicalKey(for raw: String) -> String? {
+        let l = raw.lowercased()
+        if l.contains("macos") || l == "mac" { return "macos" }
+        if l.contains("linux") || l.contains("ubuntu") || l.contains("debian") { return "linux" }
+        if l.contains("windows") || l == "win" { return "windows" }
+        if l.contains("ios") && !l.contains("macos") { return "ios" }
+        if l.contains("android") { return "android" }
+        if l.contains("tvos") { return "tvos" }
+        if l.contains("watchos") { return "watchos" }
+        return nil
+    }
+
+    private static func canonicalDisplayName(_ key: String) -> String {
+        switch key {
+        case "macos":   return "macOS"
+        case "linux":   return "Linux"
+        case "windows": return "Windows"
+        case "ios":     return "iOS"
+        case "android": return "Android"
+        case "tvos":    return "tvOS"
+        case "watchos": return "watchOS"
+        default: return key.capitalized
+        }
     }
 
     /// Dedupe bare platform names (e.g. "linux") when a more

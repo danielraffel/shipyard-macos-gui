@@ -203,17 +203,25 @@ struct ShipCardView: View {
         let order = ["macos", "linux", "windows", "ios", "android", "tvos", "watchos"]
         return order.compactMap { key -> Target? in
             guard let d = byPlatform[key] else { return nil }
-            // Use clean canonical platform names. The user's point:
-            // "Coverage report (Linux, Clang)" is a terrible platform
-            // label. "Linux" is clearer.
             var t = Target(name: Self.canonicalPlatformName(key))
             t.status = Self.aggregateStatus(d.statuses)
-            if let prov = d.provider,
-               let provEnum = RunnerProvider(rawValue: prov == "github-hosted" ? "github" : prov) {
-                t.runner = Runner(provider: provEnum, label: prov, detail: nil)
-            }
+            // Always set a runner so TargetRowView renders the pill
+            // (which is the retarget tap target). Unknown provider
+            // still gets a placeholder pill so retarget is reachable.
+            let prov = d.provider ?? "unknown"
+            let provEnum = RunnerProvider(rawValue: prov == "github-hosted" ? "github" : prov)
+                ?? .github
+            t.runner = Runner(
+                provider: provEnum,
+                label: prov == "unknown" ? "gh-actions" : prov,
+                detail: nil
+            )
             t.githubRunId = d.githubRunId
             t.githubRepo = ship.repo
+            // Phase/elapsed aren't meaningful for a GH-derived
+            // aggregate lane — leaving them unset so the row doesn't
+            // render "configure 0s". TargetRowView's metadata block
+            // checks heartbeatAgeSeconds > 0 etc. and omits when bare.
             return t
         }
     }
