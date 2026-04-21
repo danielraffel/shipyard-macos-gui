@@ -18,7 +18,7 @@ into a shell:
 - `shipyard doctor` output in a dedicated pane.
 - Notifications on merge / fail / all-green.
 
-It was my first test of [Claude Design](https://claude.ai/chat/design) — built
+It was my first test of [Claude Design](https://claude.ai/design) — built
 on an airplane — so treat the polish accordingly.
 
 ## Screenshots
