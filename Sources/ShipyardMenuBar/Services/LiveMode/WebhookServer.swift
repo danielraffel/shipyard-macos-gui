@@ -37,6 +37,10 @@ final class WebhookServer {
 
     /// Bind to a random high port on `127.0.0.1`. Returns the bound
     /// port on success.
+    ///
+    /// Waits for the listener to hit `.ready` state before reading
+    /// the port — `listener.port` can become non-nil briefly during
+    /// `.waiting` too, but connections don't succeed until `.ready`.
     func start() throws -> UInt16 {
         let params = NWParameters.tcp
         // Loopback only — Tailscale reaches us through this same
@@ -50,22 +54,45 @@ final class WebhookServer {
         listener.newConnectionHandler = { [weak self] connection in
             self?.handleConnection(connection)
         }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var readyError: Error?
+        listener.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                semaphore.signal()
+            case .failed(let error):
+                readyError = error
+                semaphore.signal()
+            case .cancelled:
+                semaphore.signal()
+            default:
+                break
+            }
+        }
         listener.start(queue: queue)
 
-        // Spin briefly until the port resolves. NWListener's `port`
-        // is nil before the listener actually binds.
-        let start = Date()
-        while listener.port == nil {
-            if Date().timeIntervalSince(start) > 2 {
-                throw NSError(
-                    domain: "WebhookServer",
-                    code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "listener didn't bind within 2s"]
-                )
-            }
-            Thread.sleep(forTimeInterval: 0.02)
+        // Bounded wait: give the listener up to 2s to bind.
+        let result = semaphore.wait(timeout: .now() + 2)
+        if result == .timedOut {
+            listener.cancel()
+            throw NSError(
+                domain: "WebhookServer",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "listener didn't reach .ready within 2s"]
+            )
         }
-        return listener.port!.rawValue
+        if let error = readyError {
+            throw error
+        }
+        guard let port = listener.port, port.rawValue > 0 else {
+            throw NSError(
+                domain: "WebhookServer",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "listener is ready but no port assigned"]
+            )
+        }
+        return port.rawValue
     }
 
     func stop() {
@@ -112,7 +139,11 @@ final class WebhookServer {
     }
 
     private func route(_ req: HTTPRequestParser.ParsedRequest) -> HTTPResponse {
-        guard req.path == "/webhook" else { return .notFound }
+        // Accept `/webhook` (what we register going forward) AND `/`
+        // (what existing hooks from pre-fix builds still POST to).
+        // Strip any query string before matching.
+        let pathOnly = req.path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? req.path
+        guard pathOnly == "/webhook" || pathOnly == "/" else { return .notFound }
         guard req.method == "POST" else { return .methodNotAllowed }
         return handler(req.headers, req.body)
     }

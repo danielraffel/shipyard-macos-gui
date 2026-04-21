@@ -43,6 +43,13 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(groupByWorktree, forKey: Keys.groupByWorktree) }
     }
 
+    /// Opt-in: when true, a ship card opens by default if it has any
+    /// activity (shipyard targets OR recent GH runs). Off by default —
+    /// the predictable "all collapsed" layout is the baseline.
+    @Published var autoExpandActivePRs: Bool = UserDefaults.standard.bool(forKey: Keys.autoExpandActivePRs) {
+        didSet { UserDefaults.standard.set(autoExpandActivePRs, forKey: Keys.autoExpandActivePRs) }
+    }
+
     @Published var showDemoData: Bool = UserDefaults.standard.bool(forKey: Keys.showDemoData) {
         didSet {
             UserDefaults.standard.set(showDemoData, forKey: Keys.showDemoData)
@@ -575,7 +582,14 @@ final class AppStore: ObservableObject {
                 if ap != bp { return ap < bp }
                 return a.startedAt > b.startedAt
             }
+        let previousRepos = knownRepos
         knownRepos.formUnion(updated.map(\.repo).filter { !$0.isEmpty })
+        // If the snapshot surfaced new repos after live mode
+        // reconciled at launch (empty-repo race), re-run reconcile
+        // so webhooks get registered on them.
+        if knownRepos != previousRepos {
+            Task { [weak self] in await self?.reconcileLiveMode() }
+        }
         detectBadgeTransition()
     }
 
@@ -949,6 +963,7 @@ final class AppStore: ObservableObject {
         static let ghWorkflowBlocklist = "ghWorkflowBlocklist"
         static let otherActionsExpanded = "otherActionsExpanded"
         static let liveUpdateMode = "liveUpdateMode"
+        static let autoExpandActivePRs = "autoExpandActivePRs"
     }
 
     /// Cancel or rerun a GitHub Actions run via `gh run …`. Both are

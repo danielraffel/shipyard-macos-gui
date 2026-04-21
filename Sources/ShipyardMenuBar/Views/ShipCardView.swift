@@ -11,11 +11,15 @@ struct ShipCardView: View {
     /// Expansion lives in the store, not in @State, so LazyVStack
     /// recycling doesn't re-open cards the user had collapsed once
     /// they scroll off-screen and back.
+    ///
+    /// Default is collapsed by default. If the user opts into
+    /// `autoExpandActivePRs` in Settings, cards with activity
+    /// (shipyard targets OR GH runs) default to expanded instead.
     private var expanded: Bool {
-        store.isExpanded(
-            pr: ship.prNumber,
-            defaultIfUnset: !ship.targets.isEmpty || !store.githubRuns(for: ship).isEmpty
-        )
+        let hasActivity = !ship.targets.isEmpty
+            || !store.githubRuns(for: ship).isEmpty
+        let defaultIfUnset = store.autoExpandActivePRs && hasActivity
+        return store.isExpanded(pr: ship.prNumber, defaultIfUnset: defaultIfUnset)
     }
 
     private func setExpanded(_ value: Bool) {

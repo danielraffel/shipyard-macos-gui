@@ -24,10 +24,24 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
-            Text("Near-realtime CI updates via webhooks instead of polling — no GitHub API rate limits. Requires Tailscale with Funnel enabled; we configure the tunnel and webhooks for you.")
+            Text(modeDescription(for: store.liveUpdateMode))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             liveStatusRow
+        }
+    }
+
+    /// Per-mode help text. Auto describes the fallback behavior
+    /// explicitly so users don't assume realtime is guaranteed when
+    /// Tailscale isn't ready.
+    private func modeDescription(for mode: LiveUpdateMode) -> String {
+        switch mode {
+        case .auto:
+            return "Near-realtime CI updates via webhooks when Tailscale Funnel is available. Falls back to polling every 60s when it isn't. We configure the tunnel and webhooks for you."
+        case .on:
+            return "Require near-realtime updates via Tailscale Funnel. Shows a warning and falls back to polling if Tailscale isn't available. We configure the tunnel and webhooks for you."
+        case .off:
+            return "Polling every 60s. No webhooks registered, no tunnel. Use Auto for live updates when Tailscale is available."
         }
     }
 
@@ -205,6 +219,10 @@ struct SettingsView: View {
     private var displaySection: some View {
         Section("Display") {
             Toggle("Group ships by worktree", isOn: $store.groupByWorktree)
+            Toggle("Auto-expand active PRs", isOn: $store.autoExpandActivePRs)
+            Text("When on, PRs with shipyard targets or recent GitHub Actions runs open by default. Your manual expand/collapse choices are always respected.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
             Toggle("Resume prompt on wake", isOn: $store.resumePromptOnWake)
         }
     }

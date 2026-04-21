@@ -160,11 +160,32 @@ final class LiveModeController {
         let secret = SecretStore.loadOrCreate(account: "shared") {
             WebhookSignature.generateSecret()
         }
-        // Register any repo we don't have a hook ID for yet.
-        for repo in repos where registered[repo] == nil {
+        // The server routes `POST /webhook`; Tailscale Funnel hands
+        // off bare hostname URLs, so explicitly append the path.
+        let hookURL = url.appendingPathComponent("webhook")
+        let key = "liveMode.lastRegisteredURL"
+        let previousURL = UserDefaults.standard.string(forKey: key)
+        let urlChanged = previousURL != hookURL.absoluteString
+
+        for repo in repos {
             do {
+                if let existingId = registered[repo] {
+                    // Already registered. If the URL we'd use now
+                    // differs from last time, patch the hook so it
+                    // points at the right place.
+                    if urlChanged {
+                        try await WebhookRegistrar.update(
+                            repo: repo,
+                            hookId: existingId,
+                            url: hookURL,
+                            secret: secret,
+                            ghBinary: ghBinary
+                        )
+                    }
+                    continue
+                }
                 let id = try await WebhookRegistrar.create(
-                    repo: repo, url: url, secret: secret, ghBinary: ghBinary
+                    repo: repo, url: hookURL, secret: secret, ghBinary: ghBinary
                 )
                 registered[repo] = id
                 persistRegistered()
@@ -174,6 +195,7 @@ final class LiveModeController {
                 _ = error
             }
         }
+        UserDefaults.standard.set(hookURL.absoluteString, forKey: key)
     }
 
     private func tearDown() async {
