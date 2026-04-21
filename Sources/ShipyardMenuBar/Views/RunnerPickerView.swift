@@ -53,39 +53,10 @@ struct RunnerPickerView: View {
                 }
                 .buttonStyle(.plain)
             }
-            ForEach(RunnerProvider.allCases, id: \.self) { provider in
-                let isCurrent = target.runner?.provider == provider
-                Button {
-                    if !isCurrent { stagedProvider = provider }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(provider.icon)
-                            .font(.system(size: 10, weight: .bold))
-                        Text(provider.rawValue)
-                            .font(.system(size: 11, weight: .medium))
-                        Spacer()
-                        if isCurrent {
-                            Text("current")
-                                .font(.system(size: 9, weight: .regular))
-                                .foregroundStyle(.secondary)
-                                .italic()
-                        } else {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .padding(.vertical, 3)
-                    .padding(.horizontal, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(isCurrent ? Color.gray.opacity(0.15) : Color.clear)
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(isCurrent || running)
-            }
+            ProviderList(
+                current: target.runner?.provider,
+                onPick: { stagedProvider = $0 }
+            )
         }
     }
 

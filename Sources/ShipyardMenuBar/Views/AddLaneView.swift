@@ -70,17 +70,14 @@ struct AddLaneView: View {
         VStack(alignment: .leading, spacing: 6) {
             header(title: "Add lane — pick target")
             if !newTargets.isEmpty {
-                sectionLabel("New targets")
                 ForEach(newTargets, id: \.self) { t in
                     targetRow(t, kind: .new)
                 }
-            }
-            if !existingTargets.isEmpty {
-                sectionLabel("Parallel runner on existing")
-                    .padding(.top, newTargets.isEmpty ? 0 : 4)
-                ForEach(existingTargets, id: \.self) { t in
-                    targetRow(t, kind: .parallel)
-                }
+            } else {
+                Text("Every known platform is already running on this PR. Use Retarget on a lane to switch its runner.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
             }
             Divider().opacity(0.3).padding(.vertical, 4)
             Button {
@@ -98,7 +95,7 @@ struct AddLaneView: View {
         }
     }
 
-    private enum TargetRowKind { case new, parallel }
+    private enum TargetRowKind { case new }
 
     private func targetRow(_ name: String, kind: TargetRowKind) -> some View {
         Button {
@@ -109,20 +106,18 @@ struct AddLaneView: View {
             HStack(spacing: 6) {
                 Text(name)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(kind == .new ? .primary : .secondary)
+                    .foregroundStyle(.primary)
                 Spacer()
-                Text(kind == .new ? "add →" : "parallel →")
+                Image(systemName: "chevron.right")
                     .font(.system(size: 9))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.tertiary)
             }
             .padding(.vertical, 3)
             .padding(.horizontal, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(kind == .new
-              ? "Add \(name) to this ship"
-              : "Dispatch a second runner for \(name)")
+        .help("Add \(name) to this ship")
     }
 
     private var customTargetField: some View {

@@ -182,33 +182,10 @@ struct JobRetargetPicker: View {
     }
 
     private var providerList: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(RunnerProvider.allCases, id: \.self) { provider in
-                Button {
-                    stagedProvider = provider
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(provider.icon)
-                            .font(.system(size: 10, weight: .bold))
-                        Text(provider.rawValue)
-                            .font(.system(size: 10, weight: .medium))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .foregroundStyle(provider.tint)
-                    .padding(.vertical, 3)
-                    .padding(.horizontal, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(provider.tint.opacity(0.1))
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(running)
-            }
-        }
+        ProviderList(
+            current: RunnerProvider(rawValue: job.provider),
+            onPick: { stagedProvider = $0 }
+        )
     }
 
     /// Confirmation step before we actually fire `shipyard cloud
