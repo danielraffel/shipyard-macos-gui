@@ -155,17 +155,68 @@ xcrun stapler staple "$DMG" \
 xcrun stapler validate "$DMG" \
   || { echo "ERROR: DMG staple didn't validate" >&2; exit 1; }
 
-# ── step 7: publish to GitHub Releases ──────────────────────────────
+# ── step 7: generate release notes (dogfood shipyard changelog) ─────
+# Prefer `shipyard changelog regenerate --release-notes <tag>` so this
+# repo exercises the same automation the main shipyard project ships.
+# Falls back to `gh release create --generate-notes` if the CLI or
+# config isn't available.
+NOTES_FILE=""
+SHIPYARD_BIN=""
+for candidate in "$HOME/.pulp/bin/shipyard" "$(command -v shipyard || true)"; do
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    SHIPYARD_BIN="$candidate"
+    break
+  fi
+done
+if [ -n "$SHIPYARD_BIN" ] && [ -f "$PROJECT_ROOT/.shipyard/config.toml" ]; then
+  NOTES_FILE="$EXPORT_ROOT/release-notes.md"
+  echo "→ Generating release notes via $SHIPYARD_BIN"
+  if "$SHIPYARD_BIN" changelog regenerate --release-notes "$TAG" \
+      >"$NOTES_FILE" 2>"$EXPORT_ROOT/notes.err"; then
+    if [ ! -s "$NOTES_FILE" ]; then
+      echo "  (shipyard produced empty notes — falling back to --generate-notes)"
+      NOTES_FILE=""
+    fi
+  else
+    echo "  (shipyard changelog failed — falling back to --generate-notes)"
+    tail -20 "$EXPORT_ROOT/notes.err" >&2 || true
+    NOTES_FILE=""
+  fi
+fi
+
+# ── step 8: publish to GitHub Releases ──────────────────────────────
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-  echo "→ Release $TAG exists — uploading with --clobber"
+  echo "→ Release $TAG exists — uploading DMG with --clobber"
   gh release upload "$TAG" "$DMG" --repo "$REPO" --clobber
+  if [ -n "$NOTES_FILE" ]; then
+    echo "→ Updating release body from shipyard notes"
+    gh release edit "$TAG" --repo "$REPO" --notes-file "$NOTES_FILE"
+  fi
 else
   echo "→ Creating GitHub release $TAG"
-  gh release create "$TAG" "$DMG" \
-    --repo "$REPO" \
-    --title "Shipyard $TAG" \
-    --generate-notes \
-    $DRAFT_FLAG
+  if [ -n "$NOTES_FILE" ]; then
+    gh release create "$TAG" "$DMG" \
+      --repo "$REPO" \
+      --title "Shipyard $TAG" \
+      --notes-file "$NOTES_FILE" \
+      $DRAFT_FLAG
+  else
+    gh release create "$TAG" "$DMG" \
+      --repo "$REPO" \
+      --title "Shipyard $TAG" \
+      --generate-notes \
+      $DRAFT_FLAG
+  fi
+fi
+
+# ── step 9: refresh CHANGELOG.md in the repo (best-effort) ──────────
+# The post-tag hook in .shipyard/config.toml would do this via a bot
+# push, but we also refresh locally so a follow-up commit captures it
+# if the bot path isn't wired up yet.
+if [ -n "$SHIPYARD_BIN" ] && [ -f "$PROJECT_ROOT/.shipyard/config.toml" ]; then
+  echo "→ Regenerating CHANGELOG.md"
+  "$SHIPYARD_BIN" changelog regenerate >/dev/null 2>&1 || \
+    echo "  (changelog regenerate skipped — non-fatal)"
 fi
 
 echo
