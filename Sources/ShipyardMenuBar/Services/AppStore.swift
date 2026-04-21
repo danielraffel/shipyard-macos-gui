@@ -116,6 +116,28 @@ final class AppStore: ObservableObject {
         return names.sorted()
     }
 
+    /// Candidate target names for a specific ship's Add Lane picker:
+    /// combines known shipyard-dispatched target names (union across
+    /// all ships), PLUS the derived target names from GitHub Actions
+    /// matrix jobs for this PR. The GH side is critical for PRs like
+    /// pulp's where `shipyard ship` didn't populate dispatched_runs
+    /// locally but the workflow matrix contains targets like
+    /// "Windows (x64)" or "macOS (ARM64)" that we can dispatch to.
+    func candidateTargetNames(for ship: Ship) -> [String] {
+        var names = Set(knownTargetNames)
+        for run in githubRuns(for: ship) {
+            for job in jobsByRunId[run.id] ?? [] {
+                // Strip the pulp-style "[provider]" suffix so the
+                // target name matches what shipyard's config expects.
+                var n = job.name
+                if let br = n.range(of: " [") { n = String(n[..<br.lowerBound]) }
+                n = n.trimmingCharacters(in: .whitespaces)
+                if !n.isEmpty { names.insert(n) }
+            }
+        }
+        return Array(names).sorted()
+    }
+
     init() {
         resolveCLIBinary()
         if showDemoData {

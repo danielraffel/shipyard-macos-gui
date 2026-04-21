@@ -52,8 +52,12 @@ struct AddLaneView: View {
         ship.targets.map(\.name).sorted()
     }
 
+    /// Candidates include both shipyard target names across all ships
+    /// AND GitHub Actions matrix job names for this PR (so pulp's
+    /// "Windows (x64)", "macOS (ARM64)", etc. appear here).
     private var newTargets: [String] {
-        store.knownTargetNames.filter { !existingTargets.contains($0) }
+        store.candidateTargetNames(for: ship)
+            .filter { !existingTargets.contains($0) }
     }
 
     private var targetPicker: some View {
