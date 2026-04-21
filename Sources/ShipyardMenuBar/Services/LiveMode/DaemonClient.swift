@@ -47,7 +47,7 @@ final class DaemonClient {
 
         guard let shipyardBinary = Self.resolveShipyardBinary() else {
             await tearDown()
-            update(status: .polling(reason: .tunnelStartFailed(
+            update(status: .polling(reason: .daemonUnavailable(
                 "shipyard CLI not found on PATH; install shipyard to enable live mode"
             )))
             return
@@ -127,7 +127,12 @@ final class DaemonClient {
 
     private func handleDisconnect(reason: String) {
         activeSession = nil
-        update(status: .polling(reason: .tunnelStartFailed(reason)))
+        // "daemon socket not available at X" / "daemon socket closed" /
+        // "daemon exited" are all daemon-process-lifecycle failures,
+        // not Tailscale Funnel failures. Attribute accordingly so the
+        // Settings banner doesn't blame Tailscale for a CLI install
+        // / spawn bug.
+        update(status: .polling(reason: .daemonUnavailable(reason)))
     }
 
     private func tearDown() async {
