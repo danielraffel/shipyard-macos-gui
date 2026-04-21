@@ -14,6 +14,13 @@ struct GitHubRunRow: View {
     @State private var hovering: Bool = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            workflowRow
+            jobsList
+        }
+    }
+
+    private var workflowRow: some View {
         HStack(spacing: 8) {
             statusIcon
             // The whole informational block is a button that opens
@@ -66,6 +73,72 @@ struct GitHubRunRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onAppear { store.fetchJobsIfNeeded(for: run) }
+    }
+
+    /// If the workflow has a matrix of jobs (e.g. Build and Test →
+    /// build-mac / build-linux / build-windows), render each job as
+    /// an indented sub-row. Critical for answering "which platforms
+    /// are running on namespace?" — those are matrix jobs, not
+    /// separate workflow runs.
+    @ViewBuilder
+    private var jobsList: some View {
+        let jobs = store.jobsByRunId[run.id] ?? []
+        // Skip when there's zero or one job — the workflow row is
+        // already the whole story. Only show when there's real matrix
+        // information to reveal.
+        if jobs.count > 1 {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(jobs, id: \.self) { job in
+                    jobRow(job)
+                }
+            }
+            .padding(.leading, 24) // indent under the workflow's status dot
+        }
+    }
+
+    private func jobRow(_ job: GitHubJob) -> some View {
+        let (color, symbol) = jobIcon(job)
+        return HStack(spacing: 6) {
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+                .font(.system(size: 9))
+            Text(job.name)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            if job.provider != "unknown" {
+                Text(job.provider)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(providerColor(job.provider))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(providerColor(job.provider).opacity(0.15), in: Capsule())
+            }
+        }
+        .padding(.vertical, 1)
+        .help("\(job.name) — \(job.runnerLabel)")
+    }
+
+    private func jobIcon(_ job: GitHubJob) -> (Color, String) {
+        switch (job.status, job.conclusion) {
+        case ("completed", "success"): return (ShipyardColors.green, "checkmark.circle.fill")
+        case ("completed", let c?) where c == "failure" || c == "timed_out": return (ShipyardColors.red, "xmark.circle.fill")
+        case ("completed", "cancelled"): return (.secondary, "slash.circle.fill")
+        case ("in_progress", _): return (ShipyardColors.blue, "circle.fill")
+        case ("queued", _), ("waiting", _): return (.secondary, "circle.dashed")
+        default: return (.secondary, "minus.circle.fill")
+        }
+    }
+
+    private func providerColor(_ provider: String) -> Color {
+        switch provider {
+        case "namespace": return ShipyardColors.orange
+        case "github-hosted": return ShipyardColors.purple
+        case "self-hosted": return ShipyardColors.blue
+        default: return .secondary
+        }
     }
 
     /// One small pill per distinct runner provider used by this run's

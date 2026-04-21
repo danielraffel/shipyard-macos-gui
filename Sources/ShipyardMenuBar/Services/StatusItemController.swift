@@ -17,19 +17,23 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            // SF Symbol "anchor" is the reliable path — it's
-            // guaranteed to load, guaranteed to template-tint (white
-            // on dark menu bar, black on light). We dropped the
-            // custom SVG asset and Unicode fallback because both
-            // were failing on this macOS build and the Unicode
-            // character falls through as a full-color emoji which
-            // looks nothing like the rest of the menu bar.
-            let image = NSImage(
-                systemSymbolName: "anchor",
-                accessibilityDescription: "Shipyard"
-            )
-            image?.isTemplate = true
-            button.image = image
+            // Try the bundled Noun Project anchor SVG first (custom
+            // illustration, licensed CC BY 3.0). Fall back to the
+            // SF Symbol anchor if the asset isn't there. We do NOT
+            // set a title — that was leaking through as a full-color
+            // emoji if both image paths failed.
+            let custom = NSImage(named: "AnchorIcon")
+            if let custom {
+                custom.size = NSSize(width: 18, height: 18)
+                custom.isTemplate = true
+                button.image = custom
+            } else {
+                let sym = NSImage(systemSymbolName: "anchor",
+                                  accessibilityDescription: "Shipyard")
+                sym?.isTemplate = true
+                button.image = sym
+            }
+            button.title = "" // explicit — never show text
             button.imagePosition = .imageOnly
             button.action = #selector(handleClick(_:))
             button.target = self
