@@ -116,26 +116,44 @@ final class AppStore: ObservableObject {
         return names.sorted()
     }
 
-    /// Candidate target names for a specific ship's Add Lane picker:
-    /// combines known shipyard-dispatched target names (union across
-    /// all ships), PLUS the derived target names from GitHub Actions
-    /// matrix jobs for this PR. The GH side is critical for PRs like
-    /// pulp's where `shipyard ship` didn't populate dispatched_runs
-    /// locally but the workflow matrix contains targets like
-    /// "Windows (x64)" or "macOS (ARM64)" that we can dispatch to.
+    /// Candidate target names for a specific ship's Add Lane picker.
+    /// Filtered to platform-like targets — names that mention a known
+    /// OS or CPU arch — so the user doesn't see every pipeline sub-
+    /// job like "Enforce version & skill sync" or "yamllint + …".
+    /// Matches the prototype's curated list.
     func candidateTargetNames(for ship: Ship) -> [String] {
-        var names = Set(knownTargetNames)
+        var names = Set(knownTargetNames.filter(Self.looksLikePlatformTarget))
         for run in githubRuns(for: ship) {
             for job in jobsByRunId[run.id] ?? [] {
-                // Strip the pulp-style "[provider]" suffix so the
-                // target name matches what shipyard's config expects.
                 var n = job.name
                 if let br = n.range(of: " [") { n = String(n[..<br.lowerBound]) }
                 n = n.trimmingCharacters(in: .whitespaces)
-                if !n.isEmpty { names.insert(n) }
+                if !n.isEmpty, Self.looksLikePlatformTarget(n) {
+                    names.insert(n)
+                }
             }
         }
         return Array(names).sorted()
+    }
+
+    /// Heuristic for "is this a platform/target name worth offering
+    /// as an Add-Lane option?" — if it mentions an OS or CPU arch we
+    /// recognize, yes. Otherwise it's likely a pipeline sub-job and
+    /// shouldn't be offered.
+    private static func looksLikePlatformTarget(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        let platforms = [
+            "macos", "mac", "linux", "windows", "win",
+            "ubuntu", "ios", "android", "tvos", "watchos",
+        ]
+        let archs = [
+            "x86_64", "x86-64", "x64", "x86",
+            "arm64", "aarch64", "amd64",
+            "universal",
+        ]
+        if platforms.contains(where: { lower.contains($0) }) { return true }
+        if archs.contains(where: { lower.contains($0) }) { return true }
+        return false
     }
 
     init() {

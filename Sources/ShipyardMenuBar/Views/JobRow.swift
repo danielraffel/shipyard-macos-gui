@@ -22,31 +22,42 @@ struct JobRow: View {
                 Image(systemName: symbol)
                     .foregroundStyle(color)
                     .font(.system(size: 9))
-                Text(job.name)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 4)
-                if job.provider != "unknown" {
-                    Text(job.provider)
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(providerColor(job.provider))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(providerColor(job.provider).opacity(0.15), in: Capsule())
+                // Job name — click opens retarget (matches prototype
+                // where tapping the build name is the retarget entry
+                // point).
+                Button {
+                    onRetarget?()
+                } label: {
+                    Text(job.name)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                // Retarget affordance (requires ship context)
-                if let onRetarget, hovering {
+                .buttonStyle(.plain)
+                .disabled(onRetarget == nil)
+                .help(onRetarget == nil
+                      ? "\(job.name) — \(job.runnerLabel)"
+                      : "Tap to retarget this job to a different runner")
+                Spacer(minLength: 4)
+                // Provider pill is ALSO a retarget affordance — click
+                // opens the same picker, mirrors the prototype.
+                if job.provider != "unknown" {
                     Button {
-                        onRetarget()
+                        onRetarget?()
                     } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.blue)
+                        Text(job.provider)
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(providerColor(job.provider))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(providerColor(job.provider).opacity(0.15), in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .help("Retarget this job to a different runner via `shipyard cloud retarget`")
+                    .disabled(onRetarget == nil)
+                    .help(onRetarget == nil
+                          ? "Ran on \(job.runnerLabel)"
+                          : "Currently on \(job.provider) — tap to retarget")
                 }
             }
             .padding(.vertical, 1)
@@ -60,7 +71,6 @@ struct JobRow: View {
                 )
             }
         }
-        .help("\(job.name) — \(job.runnerLabel)")
     }
 }
 
