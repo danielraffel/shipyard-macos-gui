@@ -101,49 +101,52 @@ struct ShipsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             Spacer()
+            overflowMenu
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// Single overflow menu (ellipsis) replacing the chevron buttons
+    /// and inline "Clear" / "Show hidden" links. Keeps the header
+    /// clean on narrow popover widths and shows labels for every
+    /// action so nothing is a mystery icon.
+    private var overflowMenu: some View {
+        Menu {
             Button {
                 store.setAllExpanded(true)
             } label: {
-                Image(systemName: "chevron.down.2")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                Label("Expand all cards", systemImage: "chevron.down.2")
             }
-            .buttonStyle(.plain)
-            .help("Expand all cards")
             Button {
                 store.setAllExpanded(false)
             } label: {
-                Image(systemName: "chevron.up.2")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                Label("Collapse all cards", systemImage: "chevron.up.2")
             }
-            .buttonStyle(.plain)
-            .help("Collapse all cards")
             if store.hiddenCount > 0 {
+                Divider()
                 Button {
                     store.restoreAllHidden()
                 } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "eye")
-                        Text("Show \(store.hiddenCount) hidden")
-                    }
-                    .font(.system(size: 11))
-                    .foregroundStyle(.blue)
+                    Label("Show \(store.hiddenCount) hidden", systemImage: "eye")
                 }
-                .buttonStyle(.plain)
-                .help("Unhide every card hidden from this list (local only — no CLI change)")
             }
             if completedCount > 0 {
-                Button("Clear \(completedCount) completed") {
+                Divider()
+                Button {
                     store.clearCompleted()
+                } label: {
+                    Label("Clear \(completedCount) completed", systemImage: "sparkles")
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11))
-                .foregroundStyle(.blue)
-                .help("Remove all passed and failed ships from the list")
             }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("List actions")
     }
 
     private var emptyState: some View {
