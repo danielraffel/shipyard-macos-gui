@@ -77,14 +77,27 @@ struct ShipsView: View {
             Image(systemName: "info.circle")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
-            Text(store.showGitHubActions
-                 ? "Above: PRs you've shipped from this machine. Below: recent GitHub Actions on the same repos."
-                 : "Showing only PRs you've shipped from this machine. Enable GitHub Actions in Settings to see more.")
+            Text(scopeFooterText)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
         }
         .padding(.top, 12)
         .padding(.horizontal, 4)
+    }
+
+    /// Footer text matches what the user actually sees: only mention
+    /// "and recent GitHub Actions" when the unrelated-runs section is
+    /// going to render. Otherwise it reads as a lie when the section
+    /// is filtered to empty.
+    private var scopeFooterText: String {
+        guard store.showGitHubActions else {
+            return "Tracked PRs you've shipped with Shipyard. Enable GitHub Actions in Settings to see more."
+        }
+        let hasUnrelated = !store.unrelatedGitHubRuns().isEmpty
+        if hasUnrelated {
+            return "Tracked PRs you've shipped with Shipyard and recent GitHub Actions."
+        }
+        return "Tracked PRs you've shipped with Shipyard."
     }
 
     private var groupedView: some View {
@@ -139,10 +152,12 @@ struct ShipsView: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-            Text("Tracked PRs")
+            // Literal uppercase (not .textCase) so "PRs" stays with a
+            // lowercase final "s" — textCase(.uppercase) would render
+            // "PRS" which reads oddly.
+            Text("TRACKED PRs")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .textCase(.uppercase)
             Text("· \(visibleShips.count)")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)

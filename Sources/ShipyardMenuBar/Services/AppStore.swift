@@ -868,13 +868,44 @@ final class AppStore: ObservableObject {
                     let previous = self.githubRunsByRepo[repo] ?? []
                     self.githubRunsByRepo[repo] = runs
                     self.reconcileJobsCache(newRuns: runs, oldRuns: previous)
-                    for run in runs {
+                    // Only fetch jobs for runs tied to a tracked ship
+                    // (branch or head_sha match). Fetching jobs for the
+                    // full top-100 burst ~100 `gh api` calls per repo
+                    // per poll — the unrelated-runs section doesn't
+                    // display job-level detail, so those fetches were
+                    // wasted budget. Ship-owned runs still get jobs so
+                    // the per-platform dot rollup stays accurate.
+                    let owned = self.ownedRunIds(for: repo)
+                    for run in runs where owned.contains(run.id) {
                         self.fetchJobsIfNeeded(for: run)
                     }
                     self.reseedAutoExpand()
                 }
             }
         }
+    }
+
+    /// The set of GitHubRun IDs currently owned by any tracked ship in
+    /// this repo — matched by branch or head_sha. Used to scope
+    /// automatic job fetches to just the ones that feed platform-dot
+    /// rendering. Unrelated runs get their jobs lazily when the user
+    /// expands "Other GitHub Actions runs."
+    private func ownedRunIds(for repo: String) -> Set<Int64> {
+        let shipsInRepo = ships.filter { !$0.dismissed && $0.repo == repo }
+        guard !shipsInRepo.isEmpty else { return [] }
+        let runs = githubRunsByRepo[repo] ?? []
+        var owned: Set<Int64> = []
+        for run in runs {
+            for ship in shipsInRepo {
+                let branchMatch = !ship.branch.isEmpty && run.headBranch == ship.branch
+                let shaMatch = !ship.headSha.isEmpty && run.headSha == ship.headSha
+                if branchMatch || shaMatch {
+                    owned.insert(run.id)
+                    break
+                }
+            }
+        }
+        return owned
     }
 
     /// Drops cached job data for any run whose status or conclusion
@@ -1004,6 +1035,14 @@ final class AppStore: ObservableObject {
     /// Absent = not fetched; present = fetched.
     @Published var prStateByKey: [String: PRState] = [:]
     private var inflightPRStateFetches: Set<String> = []
+    /// Last attempt timestamp per PR key — guards against retry storms
+    /// when `gh pr view` fails (e.g. during a GitHub rate-limit window).
+    /// Without this, every applySnapshot re-fires a `gh pr view` for
+    /// every un-cached PR, and NDJSON can emit snapshots several times
+    /// per second. With a 60s cooldown, failed fetches back off even
+    /// when the snapshot stream is noisy.
+    private var lastPRStateFetchAttempt: [String: Date] = [:]
+    private let prStateFetchCooldown: TimeInterval = 60
 
     private func prKey(repo: String, pr: Int) -> String { "\(repo)\t\(pr)" }
 
@@ -1015,7 +1054,12 @@ final class AppStore: ObservableObject {
         let key = prKey(repo: ship.repo, pr: ship.prNumber)
         if prStateByKey[key] != nil { return }
         if inflightPRStateFetches.contains(key) { return }
+        if let last = lastPRStateFetchAttempt[key],
+           Date().timeIntervalSince(last) < prStateFetchCooldown {
+            return
+        }
         inflightPRStateFetches.insert(key)
+        lastPRStateFetchAttempt[key] = Date()
         let repo = ship.repo
         let pr = ship.prNumber
         Task {
