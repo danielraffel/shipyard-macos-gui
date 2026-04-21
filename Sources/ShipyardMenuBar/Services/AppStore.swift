@@ -51,26 +51,48 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(autoExpandActivePRs, forKey: Keys.autoExpandActivePRs) }
     }
 
-    /// Does this ship have anything worth expanding? Used by the
-    /// auto-expand default. Uses the un-windowed run caches so a
-    /// merged PR whose runs are older than the GH time window still
-    /// counts as "has content" — this isn't the polling-eligibility
-    /// check, it's the "does expanding reveal anything" check.
-    func hasExpandableContent(for ship: Ship) -> Bool {
+    /// Is this PR actively being worked on right now? Drives the
+    /// auto-expand default when the setting is on.
+    ///
+    /// "Active" means one of:
+    ///  - PR is open on github.com (not merged or closed), AND
+    ///  - has shipyard targets, OR
+    ///  - has a currently-running GitHub Actions run, OR
+    ///  - has any GitHub Actions run updated within the last 30 min.
+    ///
+    /// Merged/closed PRs are excluded even if they transitioned in
+    /// the last 30 min — once they're terminal there's nothing
+    /// active to watch.
+    func isActivelyWorkedOn(_ ship: Ship) -> Bool {
+        if let pr = prState(for: ship), pr.isClosed { return false }
         if !ship.targets.isEmpty { return true }
+        let cutoff = Date().addingTimeInterval(-30 * 60)
         let branchKey = "\(ship.repo)\t\(ship.branch)"
-        let repoRuns = githubRunsByRepo[ship.repo] ?? []
-        let branchRuns = githubRunsByBranch[branchKey] ?? []
-        for run in repoRuns + branchRuns {
+        let all = (githubRunsByRepo[ship.repo] ?? [])
+            + (githubRunsByBranch[branchKey] ?? [])
+        for run in all {
             let branchMatch = !ship.branch.isEmpty && run.headBranch == ship.branch
             let shaMatch = !ship.headSha.isEmpty && run.headSha == ship.headSha
-            if branchMatch || shaMatch { return true }
+            guard branchMatch || shaMatch else { continue }
+            if run.isRunning { return true }
+            if run.updatedAt >= cutoff { return true }
         }
         return false
     }
 
-    @Published var showDemoData: Bool = UserDefaults.standard.bool(forKey: Keys.showDemoData) {
+    // Demo-data toggle is a developer convenience. In Release builds
+    // (no DEBUG flag) the stored pref is ignored and the toggle is
+    // hidden from Settings — shipped DMGs never show fixture data
+    // even if an older Debug run flipped the pref.
+    @Published var showDemoData: Bool = {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: Keys.showDemoData)
+        #else
+        return false
+        #endif
+    }() {
         didSet {
+            #if DEBUG
             UserDefaults.standard.set(showDemoData, forKey: Keys.showDemoData)
             if showDemoData {
                 ships = DemoFixtures.ships
@@ -78,6 +100,7 @@ final class AppStore: ObservableObject {
                 ships = []
                 restartPipelineIfPossible()
             }
+            #endif
         }
     }
 
@@ -111,6 +134,13 @@ final class AppStore: ObservableObject {
 
     func setExpanded(_ value: Bool, for pr: Int) {
         prExpansionState[pr] = value
+    }
+
+    /// True when a PR has been explicitly expanded or collapsed —
+    /// either by the user or by the auto-expand seed. Lets the seed
+    /// code avoid re-seeding once a card already has a choice.
+    func hasExplicitExpansion(for pr: Int) -> Bool {
+        prExpansionState[pr] != nil
     }
 
     func setAllExpanded(_ expanded: Bool) {
@@ -459,7 +489,24 @@ final class AppStore: ObservableObject {
         if let pr = prState(for: ship), pr.isClosed {
             return true
         }
+        // Empty-targets ships report .pending even when their GH
+        // runs have all completed. Use the derived status so the
+        // "failed" pill on the card matches what clearCompleted acts
+        // on.
+        if let derived = derivedStatusFromGitHub(for: ship),
+           derived == .passed || derived == .failed {
+            return true
+        }
         return false
+    }
+
+    /// Nuclear "Clear all" — dismiss every tracked PR regardless of
+    /// state. Mirrors the per-card hide button, applied in bulk.
+    /// Reversible via "Show N hidden" until the user quits the app.
+    func clearAll() {
+        for index in ships.indices where !ships[index].dismissed {
+            ships[index].dismissed = true
+        }
     }
 
     func toggleAutoMerge(for ship: Ship) {

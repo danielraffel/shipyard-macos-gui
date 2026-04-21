@@ -11,7 +11,9 @@ struct SettingsView: View {
             notificationsSection
             autoClearSection
             displaySection
+            #if DEBUG
             developerSection
+            #endif
         }
         .formStyle(.grouped)
     }
@@ -193,7 +195,7 @@ struct SettingsView: View {
 
     private var notificationsSection: some View {
         Section("Notifications") {
-            Toggle("Ship fails", isOn: $store.notifyOnFail)
+            Toggle("PR fails", isOn: $store.notifyOnFail)
             Toggle("All green", isOn: $store.notifyOnGreen)
             Toggle("Merge complete", isOn: $store.notifyOnMerge)
         }
@@ -201,13 +203,13 @@ struct SettingsView: View {
 
     private var autoClearSection: some View {
         Section("Auto-clear") {
-            Picker("Passed ships", selection: $store.autoClearPassedMinutes) {
+            Picker("Passed PRs", selection: $store.autoClearPassedMinutes) {
                 Text("30 min").tag(30)
                 Text("1 hour").tag(60)
                 Text("4 hours").tag(240)
                 Text("Never").tag(0)
             }
-            Picker("Failed ships", selection: $store.autoClearFailedMinutes) {
+            Picker("Failed PRs", selection: $store.autoClearFailedMinutes) {
                 Text("1 hour").tag(60)
                 Text("4 hours").tag(240)
                 Text("1 day").tag(1440)
@@ -218,15 +220,16 @@ struct SettingsView: View {
 
     private var displaySection: some View {
         Section("Display") {
-            Toggle("Group ships by worktree", isOn: $store.groupByWorktree)
-            Toggle("Auto-expand PRs with content", isOn: $store.autoExpandActivePRs)
-            Text("When on, PRs with shipyard targets or any cached GitHub Actions runs open by default. Your manual expand/collapse choices are always respected.")
+            Toggle("Group PRs by worktree", isOn: $store.groupByWorktree)
+            Toggle("Auto-expand active PRs", isOn: $store.autoExpandActivePRs)
+            Text("When on, only PRs that are actively running or updated within the last 30 minutes open by default. Stays expanded until you collapse or quit the app.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Toggle("Resume prompt on wake", isOn: $store.resumePromptOnWake)
         }
     }
 
+    #if DEBUG
     private var developerSection: some View {
         Section("Developer") {
             Toggle("Show demo data", isOn: $store.showDemoData)
@@ -235,6 +238,7 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
         }
     }
+    #endif
 
     private func browse() {
         let panel = NSOpenPanel()

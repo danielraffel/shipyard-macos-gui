@@ -12,15 +12,11 @@ struct ShipCardView: View {
     /// recycling doesn't re-open cards the user had collapsed once
     /// they scroll off-screen and back.
     ///
-    /// Default is collapsed. If the user opts into
-    /// `autoExpandActivePRs` in Settings, any card that actually has
-    /// content to show defaults to expanded — `hasExpandableContent`
-    /// checks the unfiltered run caches, so a long-merged PR whose
-    /// runs are older than the GH time window still expands.
+    /// Default is collapsed. Actual expansion always reads from the
+    /// store; the auto-expand "seed" fires from `onAppear` so the
+    /// decision sticks (set once, don't flip on status changes).
     private var expanded: Bool {
-        let defaultIfUnset = store.autoExpandActivePRs
-            && store.hasExpandableContent(for: ship)
-        return store.isExpanded(pr: ship.prNumber, defaultIfUnset: defaultIfUnset)
+        store.isExpanded(pr: ship.prNumber, defaultIfUnset: false)
     }
 
     private func setExpanded(_ value: Bool) {
@@ -78,6 +74,16 @@ struct ShipCardView: View {
             // be expanded.
             for run in store.githubRuns(for: ship) {
                 store.fetchJobsIfNeeded(for: run)
+            }
+            // Auto-expand seed: one-shot decision per PR per session.
+            // We set it on first onAppear when the setting is on AND
+            // the PR is actively being worked on. Once set, it sticks
+            // even if the PR later becomes inactive — matches the
+            // "stay expanded until I collapse or quit" contract.
+            if store.autoExpandActivePRs,
+               !store.hasExplicitExpansion(for: ship.prNumber),
+               store.isActivelyWorkedOn(ship) {
+                store.setExpanded(true, for: ship.prNumber)
             }
         }
     }

@@ -138,6 +138,15 @@ struct ShipsView: View {
                     Label("Clear \(completedCount) completed", systemImage: "sparkles")
                 }
             }
+            let visibleCount = store.ships.filter { !$0.dismissed }.count
+            if visibleCount > 0 {
+                if completedCount == 0 { Divider() }
+                Button(role: .destructive) {
+                    store.clearAll()
+                } label: {
+                    Label("Clear all \(visibleCount)", systemImage: "xmark.circle")
+                }
+            }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 12))
