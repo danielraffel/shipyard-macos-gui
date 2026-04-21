@@ -500,9 +500,17 @@ final class AppStore: ObservableObject {
     private func pollGitHubOnce() async {
         let repos = await MainActor.run { self.knownRepos }
         for repo in repos {
-            if let runs = await GitHubActionsPoller.fetch(repo: repo, limit: 30) {
+            if let runs = await GitHubActionsPoller.fetch(repo: repo, limit: 100) {
                 await MainActor.run {
                     self.githubRunsByRepo[repo] = runs
+                    // Kick off a jobs fetch for every new run we
+                    // learned about. Matrix jobs are what populate
+                    // the platform lanes — without this, lanes only
+                    // appear after the user interacts with the card
+                    // a second time.
+                    for run in runs {
+                        self.fetchJobsIfNeeded(for: run)
+                    }
                 }
             }
         }
@@ -577,6 +585,13 @@ final class AppStore: ObservableObject {
             ) {
                 await MainActor.run {
                     self.githubRunsByBranch["\(repo)\t\(branch)"] = runs
+                    // Branch-scoped runs land async — chain job
+                    // fetches immediately so platform lanes can
+                    // populate on the same render cycle instead of
+                    // requiring the user to trigger another.
+                    for run in runs {
+                        self.fetchJobsIfNeeded(for: run)
+                    }
                 }
             }
         }
