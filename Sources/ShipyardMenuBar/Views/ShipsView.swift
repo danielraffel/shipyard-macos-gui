@@ -6,6 +6,7 @@ struct ShipsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
+                rateLimitBanner
                 if store.ships.isEmpty {
                     emptyState
                 } else {
@@ -24,6 +25,51 @@ struct ShipsView: View {
             }
             .padding(12)
         }
+    }
+
+    /// Informational strip when the user's 5,000/hr GitHub REST budget
+    /// is exhausted or near-exhausted. Polling data stops refreshing
+    /// during the exhaustion window; webhooks still work. Banner tells
+    /// the user the app will catch up automatically once the reset
+    /// fires — no need to quit and restart.
+    @ViewBuilder
+    private var rateLimitBanner: some View {
+        if let rl = store.githubRateLimit, rl.isExceeded || rl.isNearExhaustion {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: rl.isExceeded
+                      ? "exclamationmark.triangle.fill"
+                      : "clock.arrow.circlepath")
+                    .foregroundStyle(rl.isExceeded ? .orange : .yellow)
+                    .font(.system(size: 12))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(rl.isExceeded
+                         ? "GitHub API rate limit exceeded"
+                         : "GitHub API rate limit low")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(bannerDetail(for: rl))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill((rl.isExceeded ? Color.orange : Color.yellow).opacity(0.12))
+            )
+        }
+    }
+
+    private func bannerDetail(for rl: GitHubRateLimit) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        let when = f.localizedString(for: rl.resetAt, relativeTo: Date())
+        if rl.isExceeded {
+            return "Polling paused until reset \(when). Live webhook updates still working. App will catch up automatically — no need to quit."
+        }
+        return "\(rl.remaining) of \(rl.limit) calls left. Resets \(when)."
     }
 
     private var scopeFooter: some View {

@@ -370,6 +370,33 @@ final class AppStore: ObservableObject {
     /// expand so even old PR branches surface real runs.
     @Published var githubRunsByBranch: [String: [GitHubRun]] = [:]
 
+    /// Latest REST rate-limit snapshot, polled every 2 min. Drives
+    /// the exhaustion banner in ShipsView. `nil` until the first
+    /// probe completes.
+    @Published private(set) var githubRateLimit: GitHubRateLimit?
+    private var rateLimitTask: Task<Void, Never>?
+
+    func startRateLimitPolling() {
+        rateLimitTask?.cancel()
+        rateLimitTask = Task { [weak self] in
+            while !Task.isCancelled {
+                if let snapshot = await GitHubRateLimitPoller.fetch() {
+                    await MainActor.run { self?.githubRateLimit = snapshot }
+                }
+                // 2 min — /rate_limit itself is free (doesn't count
+                // against the user's budget), so frequent checks are
+                // safe. The banner needs to refresh reset-in-N-min
+                // countdown periodically anyway.
+                try? await Task.sleep(nanoseconds: 120_000_000_000)
+            }
+        }
+    }
+
+    func stopRateLimitPolling() {
+        rateLimitTask?.cancel()
+        rateLimitTask = nil
+    }
+
     private var githubPollTask: Task<Void, Never>?
 
     private var pipeline: ShipyardPipeline?
@@ -520,6 +547,7 @@ final class AppStore: ObservableObject {
             await self?.reconcileLiveMode()
             await MainActor.run { self?.startTailscaleWatcher() }
         }
+        startRateLimitPolling()
     }
 
     func dismiss(ship: Ship) {
