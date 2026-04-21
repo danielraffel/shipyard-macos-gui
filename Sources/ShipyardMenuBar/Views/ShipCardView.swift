@@ -58,6 +58,10 @@ struct ShipCardView: View {
             // top-100 slice (common for older PRs in fast-moving
             // repos like pulp).
             store.fetchRunsForShipOnDemand(ship)
+            // Check the PR's actual state on GitHub (OPEN / CLOSED /
+            // MERGED). A ship-state for a merged PR shouldn't show
+            // "awaiting CI" — it should show "merged".
+            store.fetchPRStateIfNeeded(for: ship)
             // If this card has nested Actions but no ship-state
             // targets, default to expanded so the user actually sees
             // that there's activity. Without this, cards look empty.
@@ -257,42 +261,47 @@ struct ShipCardView: View {
     }
 
     private var statusPill: some View {
-        // Effective status: if shipyard didn't dispatch locally but
-        // GitHub Actions ran (via push triggers), use THAT as the
-        // ship's effective status. This is the normal case for pulp
-        // PRs where `shipyard ship` just pushes the branch and CI
-        // auto-triggers on the PR event.
-        let effective: TargetStatus = {
-            if ship.targets.isEmpty,
-               let derived = store.derivedStatusFromGitHub(for: ship) {
-                return derived
-            }
-            return ship.overallStatus
-        }()
-
+        // PR state on github.com is the authoritative "is this PR
+        // actually active?" signal. Check it first — a merged/closed
+        // PR should never show "running" or "awaiting CI" regardless
+        // of what the local ship-state says.
+        let prState = store.prState(for: ship)
         let label: String
         let color: Color
         let icon: String?
-        switch effective {
-        case .passed:
-            label = "green"; color = ShipyardColors.green
+
+        if let prState, prState.isMerged {
+            label = "merged"; color = ShipyardColors.purple
             icon = "arrow.trianglehead.merge"
-        case .failed:
-            label = "failed"; color = ShipyardColors.red; icon = nil
-        case .running:
-            label = "running"; color = ShipyardColors.blue; icon = nil
-        case .reused:
-            label = "reused"; color = ShipyardColors.purple; icon = nil
-        case .skipped:
-            label = "skipped"; color = .secondary; icon = nil
-        case .pending:
-            // Distinguish "queued with targets declared, waiting to run"
-            // from "nothing dispatched locally and no GH runs yet"
-            // (orphaned or very recent).
-            if ship.targets.isEmpty {
-                label = "awaiting CI"; color = .secondary; icon = nil
-            } else {
-                label = "queued"; color = .secondary; icon = nil
+        } else if let prState, prState.isClosed {
+            label = "closed"; color = .secondary; icon = "xmark.circle"
+        } else {
+            // Open (or unknown) PR — derive from shipyard + GH runs.
+            let effective: TargetStatus = {
+                if ship.targets.isEmpty,
+                   let derived = store.derivedStatusFromGitHub(for: ship) {
+                    return derived
+                }
+                return ship.overallStatus
+            }()
+            switch effective {
+            case .passed:
+                label = "green"; color = ShipyardColors.green
+                icon = "arrow.trianglehead.merge"
+            case .failed:
+                label = "failed"; color = ShipyardColors.red; icon = nil
+            case .running:
+                label = "running"; color = ShipyardColors.blue; icon = nil
+            case .reused:
+                label = "reused"; color = ShipyardColors.purple; icon = nil
+            case .skipped:
+                label = "skipped"; color = .secondary; icon = nil
+            case .pending:
+                if ship.targets.isEmpty {
+                    label = "awaiting CI"; color = .secondary; icon = nil
+                } else {
+                    label = "queued"; color = .secondary; icon = nil
+                }
             }
         }
         return HStack(spacing: 3) {

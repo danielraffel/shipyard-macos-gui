@@ -379,6 +379,40 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: - PR state on github.com
+
+    /// Cache of PR state from github.com. Keyed by "repo\tpr".
+    /// Absent = not fetched; present = fetched.
+    @Published var prStateByKey: [String: PRState] = [:]
+    private var inflightPRStateFetches: Set<String> = []
+
+    private func prKey(repo: String, pr: Int) -> String { "\(repo)\t\(pr)" }
+
+    func prState(for ship: Ship) -> PRState? {
+        prStateByKey[prKey(repo: ship.repo, pr: ship.prNumber)]
+    }
+
+    func fetchPRStateIfNeeded(for ship: Ship) {
+        let key = prKey(repo: ship.repo, pr: ship.prNumber)
+        if prStateByKey[key] != nil { return }
+        if inflightPRStateFetches.contains(key) { return }
+        inflightPRStateFetches.insert(key)
+        let repo = ship.repo
+        let pr = ship.prNumber
+        Task {
+            if let state = await PRStatePoller.fetch(repo: repo, pr: pr) {
+                await MainActor.run {
+                    self.prStateByKey[key] = state
+                    self.inflightPRStateFetches.remove(key)
+                }
+            } else {
+                await MainActor.run {
+                    self.inflightPRStateFetches.remove(key)
+                }
+            }
+        }
+    }
+
     // MARK: - Per-run job details (runner provider)
 
     /// Keyed by run id. Populated by fetchJobsIfNeeded and read by
