@@ -281,25 +281,24 @@ final class AppStore: ObservableObject {
         dismiss(ship: ship)
     }
 
-    /// Sweeps terminal / closed ships out of the local view. Runs in
-    /// two passes so it clears what we KNOW about first, then retries
-    /// after proactively fetching PR state for any ship the first
-    /// pass couldn't decide on.
+    /// Sweeps terminal / closed ships out of the local view. Never
+    /// touches dismissed (hidden) ships — those live behind the
+    /// "Show N hidden" undo button and user chose to set them aside.
     func clearCompleted() {
-        // Pass 1: remove anything we can decide on right now.
-        ships.removeAll { isCompleted($0) }
-
-        // Pass 2: kick off PR-state fetches for remaining ships and
-        // clear again when they come in. Fire-and-forget — the @Published
-        // prStateByKey update triggers a re-render on its own; the user
-        // can click Clear again if they want to sweep mid-refresh.
+        ships.removeAll { ship in
+            guard !ship.dismissed else { return false }
+            return isCompleted(ship)
+        }
         for ship in ships where !ship.dismissed {
             fetchPRStateIfNeeded(for: ship)
         }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             await MainActor.run {
-                self?.ships.removeAll { self?.isCompleted($0) == true }
+                self?.ships.removeAll { ship in
+                    guard !ship.dismissed else { return false }
+                    return self?.isCompleted(ship) == true
+                }
             }
         }
     }
@@ -389,6 +388,7 @@ final class AppStore: ObservableObject {
             uniqueKeysWithValues: ships.map { ($0.prNumber, $0) }
         )
         var updated: [Ship] = []
+        var seenPRs: Set<Int> = []
         for entry in entries {
             var ship = Ship(from: entry)
             if let existing = byPR[entry.pr] {
@@ -396,12 +396,19 @@ final class AppStore: ObservableObject {
                 ship.autoMerge = existing.autoMerge
             }
             updated.append(ship)
+            seenPRs.insert(entry.pr)
         }
 
-        // Proactively prime PR state for every ship we haven't
-        // fetched yet. Otherwise "Clear N completed" under-reports
-        // because merged/closed ships whose state hasn't been
-        // fetched look like "still in flight" to the filter.
+        // Preserve hidden ships that fell off the CLI's ship-state
+        // list (e.g. because shipyard auto-archived them, or the user
+        // ran `ship-state discard` elsewhere). Otherwise a hidden
+        // ship disappearing from the snapshot evaporates from the
+        // store, and "Show N hidden" can't bring it back. Dismissed
+        // ships persist until the user explicitly restores or quits.
+        for old in ships where old.dismissed && !seenPRs.contains(old.prNumber) {
+            updated.append(old)
+        }
+
         for ship in updated {
             fetchPRStateIfNeeded(for: ship)
         }
