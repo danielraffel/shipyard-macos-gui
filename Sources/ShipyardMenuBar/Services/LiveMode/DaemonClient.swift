@@ -224,7 +224,21 @@ private final class Session {
             args.append("--repo")
             args.append(repo)
         }
-        _ = await runShipyard(args: args, timeout: 8)
+        let (exitCode, output) = await runShipyard(args: args, timeout: 8)
+        // Shipyard CLI 0.22.4+ returns a non-zero exit when the child
+        // daemon dies inside the verification window (e.g. PyInstaller
+        // bundle missing encodings.idna). Older CLIs exit 0 here even
+        // on failure; in that case we silently proceed and let the
+        // socket-connect retry loop surface the actual problem.
+        if exitCode != 0 {
+            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = trimmed.isEmpty
+                ? "shipyard daemon start exited \(exitCode)"
+                : trimmed
+            // Route through the existing disconnect path so the Settings
+            // banner flips from "Live" to "polling — daemon exited: …".
+            onDisconnect?(detail)
+        }
     }
 
     private func connectSocket() async {
