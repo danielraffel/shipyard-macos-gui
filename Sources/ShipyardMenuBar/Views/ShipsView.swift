@@ -119,6 +119,20 @@ struct ShipsView: View {
             }
             .buttonStyle(.plain)
             .help("Collapse all cards")
+            if store.hiddenCount > 0 {
+                Button {
+                    store.restoreAllHidden()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "eye")
+                        Text("Show \(store.hiddenCount) hidden")
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
+                .help("Unhide every card hidden from this list (local only — no CLI change)")
+            }
             if completedCount > 0 {
                 Button("Clear \(completedCount) completed") {
                     store.clearCompleted()

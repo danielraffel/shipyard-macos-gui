@@ -229,6 +229,20 @@ final class AppStore: ObservableObject {
         ships[index].dismissed = true
     }
 
+    /// Undo of a local hide — clears the dismissed flag on every
+    /// currently-hidden ship so they reappear in the list. The
+    /// CLI ship-state isn't touched (hide was local-only), so this
+    /// is a pure UI restore.
+    func restoreAllHidden() {
+        for i in ships.indices where ships[i].dismissed {
+            ships[i].dismissed = false
+        }
+    }
+
+    var hiddenCount: Int {
+        ships.filter(\.dismissed).count
+    }
+
     /// Archive the underlying ship-state file via the CLI. Use this when
     /// the user wants a stale entry truly gone, not just hidden locally.
     /// Idempotent — CLI returns success even if the state was already
