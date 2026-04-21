@@ -133,7 +133,34 @@ final class AppStore: ObservableObject {
                 }
             }
         }
-        return Array(names).sorted()
+        return Self.dedupePlatformNames(Array(names)).sorted()
+    }
+
+    /// Dedupe bare platform names (e.g. "linux") when a more
+    /// specific candidate exists (e.g. "Linux (x64)"). Keeps the
+    /// specific one; drops the bare one. Prevents the picker from
+    /// showing three nearly-identical rows.
+    private static func dedupePlatformNames(_ input: [String]) -> [String] {
+        let bareTokens: Set<String> = ["linux", "windows", "macos", "mac", "ubuntu", "ios", "android", "win"]
+        var result: [String] = []
+        for name in input {
+            let lower = name.lowercased()
+            // If this is a bare platform word, check if a more
+            // specific variant exists in the input.
+            if bareTokens.contains(lower) {
+                let hasMoreSpecific = input.contains { other in
+                    guard other != name else { return false }
+                    let otherLower = other.lowercased()
+                    return otherLower.hasPrefix(lower + " ")
+                        || otherLower.hasPrefix(lower + "(")
+                        || otherLower.hasPrefix(lower + "-")
+                        || otherLower.hasPrefix(lower + "_")
+                }
+                if hasMoreSpecific { continue }
+            }
+            result.append(name)
+        }
+        return result
     }
 
     /// Heuristic for "is this a platform/target name worth offering

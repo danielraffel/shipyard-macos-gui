@@ -93,6 +93,7 @@ struct JobRetargetPicker: View {
     @State private var running: Bool = false
     @State private var resultMessage: String?
     @State private var targetOverride: String?
+    @State private var stagedProvider: RunnerProvider?
 
     private var derivedTarget: String {
         // pulp convention: "Windows (x64) [namespace]" → "Windows (x64)"
@@ -104,6 +105,10 @@ struct JobRetargetPicker: View {
 
     private var effectiveTarget: String {
         targetOverride ?? derivedTarget
+    }
+
+    private var isActivelyRunning: Bool {
+        job.status == "in_progress" || job.status == "queued"
     }
 
     var body: some View {
@@ -123,6 +128,8 @@ struct JobRetargetPicker: View {
                     }
                     .buttonStyle(.plain)
                 }
+            } else if let provider = stagedProvider {
+                confirmationStep(for: provider)
             } else {
                 header
                 targetHint
@@ -178,7 +185,7 @@ struct JobRetargetPicker: View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(RunnerProvider.allCases, id: \.self) { provider in
                 Button {
-                    Task { await perform(provider) }
+                    stagedProvider = provider
                 } label: {
                     HStack(spacing: 6) {
                         Text(provider.icon)
@@ -204,6 +211,55 @@ struct JobRetargetPicker: View {
         }
     }
 
+    /// Confirmation step before we actually fire `shipyard cloud
+    /// retarget`. Running jobs get a red "Interrupt & Retarget"
+    /// button; pending/completed ones get a calmer "Retarget" blue.
+    @ViewBuilder
+    private func confirmationStep(for provider: RunnerProvider) -> some View {
+        let warn = isActivelyRunning
+        VStack(alignment: .leading, spacing: 6) {
+            if warn {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(ShipyardColors.red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("This job is actively running")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(ShipyardColors.red)
+                        Text("Retargeting will interrupt \(effectiveTarget) on \(job.provider) and restart it on \(provider.rawValue).")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(6)
+                .background(ShipyardColors.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+            } else {
+                Text("Move \(effectiveTarget) from \(job.provider) → \(provider.rawValue)?")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.primary)
+            }
+            HStack {
+                Button("Cancel") { stagedProvider = nil }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    Task { await perform(provider) }
+                } label: {
+                    Text(warn ? "Interrupt & Retarget" : "Retarget")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(warn ? ShipyardColors.red : ShipyardColors.blue, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(running)
+            }
+        }
+    }
+
     @MainActor
     private func perform(_ provider: RunnerProvider) async {
         running = true
@@ -218,6 +274,7 @@ struct JobRetargetPicker: View {
         } else {
             resultMessage = "Dispatched → \(provider.rawValue). Next poll will show progress."
         }
+        stagedProvider = nil
         try? await Task.sleep(nanoseconds: 2_500_000_000)
         onDismiss()
     }
