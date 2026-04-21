@@ -6,6 +6,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             cliSection
+            liveUpdatesSection
             githubSection
             notificationsSection
             autoClearSection
@@ -13,6 +14,88 @@ struct SettingsView: View {
             developerSection
         }
         .formStyle(.grouped)
+    }
+
+    private var liveUpdatesSection: some View {
+        Section("Live updates") {
+            Picker("Mode", selection: $store.liveUpdateMode) {
+                ForEach(LiveUpdateMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text("Near-realtime CI updates via webhooks instead of polling — no GitHub API rate limits. Requires Tailscale with Funnel enabled; we configure the tunnel and webhooks for you.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            liveStatusRow
+        }
+    }
+
+    @ViewBuilder
+    private var liveStatusRow: some View {
+        switch store.liveStatus {
+        case .live(let url, let lastEventAt):
+            HStack(spacing: 6) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Live · via Tailscale Funnel")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(liveStatusDetail(url: url, lastEventAt: lastEventAt))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        case .polling(let reason):
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: pollingIcon(for: reason))
+                    .foregroundStyle(pollingTint(for: reason))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(pollingTitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(pollingTint(for: reason))
+                    if let reason {
+                        Text(reason.userFacing)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private var pollingTitle: String {
+        if case .polling(let reason) = store.liveStatus,
+           reason != nil,
+           store.liveUpdateMode == .on {
+            return "Warning — falling back to polling"
+        }
+        return "Polling every 60s"
+    }
+
+    private func pollingIcon(for reason: LiveUpdateStatus.PollingReason?) -> String {
+        if store.liveUpdateMode == .on && reason != nil {
+            return "exclamationmark.triangle.fill"
+        }
+        return "arrow.clockwise"
+    }
+
+    private func pollingTint(for reason: LiveUpdateStatus.PollingReason?) -> Color {
+        if store.liveUpdateMode == .on && reason != nil {
+            return .orange
+        }
+        return .secondary
+    }
+
+    private func liveStatusDetail(url: URL, lastEventAt: Date?) -> String {
+        if let last = lastEventAt {
+            let f = RelativeDateTimeFormatter()
+            f.unitsStyle = .short
+            return "last event \(f.localizedString(for: last, relativeTo: Date()))"
+        }
+        return "waiting for first event · \(url.host ?? url.absoluteString)"
     }
 
     private var githubSection: some View {

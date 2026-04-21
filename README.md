@@ -31,6 +31,19 @@ on an airplane — so treat the polish accordingly.
 |---|---|
 | ![Add lane](docs/screenshots/add-lane.png) | ![Other checks](docs/screenshots/other-checks.png) |
 
+## Live mode (optional)
+
+Sub-second CI status via webhooks instead of polling — no GitHub API
+rate limits. Requires [Tailscale](https://tailscale.com) with
+[Funnel](https://tailscale.com/kb/1223/funnel) enabled on your tailnet.
+When enabled, Shipyard sets up the tunnel and registers webhooks
+automatically; disabling reverses both.
+
+Default is **Auto** (live when Tailscale is ready, polling at 60s when
+it isn't). Set **On** to require live with a warning when unavailable,
+or **Off** to force polling. Webhook events route through Tailscale's
+edge directly to your Mac — no Shipyard-operated backend in between.
+
 ## Download
 
 **[Latest signed & notarized DMG](https://github.com/danielraffel/shipyard-macos-gui/releases/latest/download/Shipyard.dmg)**

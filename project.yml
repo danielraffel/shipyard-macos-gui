@@ -20,6 +20,26 @@ settings:
     CLANG_ENABLE_MODULES: YES
     ENABLE_USER_SCRIPT_SANDBOXING: NO
 targets:
+  ShipyardMenuBarTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Tests/ShipyardMenuBarTests
+    dependencies:
+      - target: ShipyardMenuBar
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.danielraffel.shipyard.menubar.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Shipyard.app/Contents/MacOS/Shipyard"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        # Match the host app's signing so the test bundle loads into it.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Developer ID Application: Daniel Raffel (95CX6P84C4)"
+        DEVELOPMENT_TEAM: 95CX6P84C4
+        ENABLE_HARDENED_RUNTIME: NO
+
   ShipyardMenuBar:
     type: application
     platform: macOS

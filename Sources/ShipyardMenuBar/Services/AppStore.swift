@@ -97,6 +97,98 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: - Live updates (Tailscale Funnel webhooks)
+
+    /// User preference: Auto (default) / On / Off. See issue #2.
+    @Published var liveUpdateMode: LiveUpdateMode = LiveUpdateMode(
+        rawValue: UserDefaults.standard.string(forKey: Keys.liveUpdateMode) ?? "auto"
+    ) ?? .auto {
+        didSet {
+            UserDefaults.standard.set(liveUpdateMode.rawValue, forKey: Keys.liveUpdateMode)
+            if oldValue != liveUpdateMode {
+                Task { await reconcileLiveMode() }
+            }
+        }
+    }
+
+    /// Latest resolved runtime state (live vs polling + reason).
+    @Published private(set) var liveStatus: LiveUpdateStatus = .polling(reason: .userDisabled)
+
+    /// Latest Tailscale probe result. Re-run at launch + on foreground
+    /// + every 60s while the app is open.
+    @Published private(set) var tailscaleStatus: TailscaleStatus?
+
+    private let liveController = LiveModeController()
+    private var tailscaleProbeTask: Task<Void, Never>?
+
+    /// Re-probe Tailscale and reconcile the live controller. Safe to
+    /// call from anywhere — handles its own @MainActor hop.
+    func reconcileLiveMode() async {
+        let probe = await TailscaleProbe.probe()
+        await MainActor.run {
+            self.tailscaleStatus = probe
+        }
+        await liveController.reconcile(
+            mode: liveUpdateMode,
+            tailscale: probe,
+            repos: Set(ships.map(\.repo)).filter { !$0.isEmpty }.union(knownRepos),
+            ghBinary: resolveGHBinary()
+        ) { [weak self] event in
+            self?.apply(webhookEvent: event)
+        }
+        await MainActor.run {
+            self.liveStatus = self.liveController.status
+        }
+    }
+
+    /// Kick off a lightweight periodic Tailscale re-probe so
+    /// Auto-mode toggles seamlessly when the user stops/starts
+    /// Tailscale. Cheap: ~1 `tailscale status --json` per minute.
+    func startTailscaleWatcher() {
+        tailscaleProbeTask?.cancel()
+        tailscaleProbeTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                if Task.isCancelled { break }
+                await self?.reconcileLiveMode()
+            }
+        }
+    }
+
+    /// Translate a decoded webhook event into an AppStore mutation.
+    /// The actual evictions of cached jobs/runs piggyback on the
+    /// existing reconcile path so the UI stays consistent with what
+    /// polling would have produced.
+    private func apply(webhookEvent event: WebhookEvent) {
+        switch event {
+        case .workflowRun(let p):
+            // Drop cached jobs for this run so the next render refreshes
+            // per-platform dots from fresh data.
+            jobsByRunId.removeValue(forKey: p.runId)
+            // Kick a lightweight branch fetch to pull the updated run
+            // back into cache. force:true bypasses the rate-limit TTL.
+            if let ship = ships.first(where: { $0.repo == p.repo && $0.branch == p.headBranch }) {
+                fetchRunsForShipOnDemand(ship, force: true)
+            }
+        case .workflowJob(let p):
+            jobsByRunId.removeValue(forKey: p.runId)
+            // Also re-fetch jobs for this run so the per-platform
+            // rollup reflects the new status immediately.
+            if let existing = githubRunsByRepo[p.repo]?.first(where: { $0.id == p.runId }) {
+                fetchJobsIfNeeded(for: existing)
+            }
+        case .pullRequest(let p):
+            // Drop cached PR state so the next render re-fetches.
+            let key = prKey(repo: p.repo, pr: p.number)
+            prStateByKey.removeValue(forKey: key)
+            if let ship = ships.first(where: { $0.repo == p.repo && $0.prNumber == p.number }) {
+                fetchPRStateIfNeeded(for: ship)
+            }
+        case .unhandled:
+            break
+        }
+    }
+
     @Published var showGitHubActions: Bool = UserDefaults.standard.object(forKey: Keys.showGitHubActions) as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(showGitHubActions, forKey: Keys.showGitHubActions)
@@ -263,6 +355,14 @@ final class AppStore: ObservableObject {
         }
         if showGitHubActions {
             startGitHubPolling()
+        }
+        liveController.onStatusChange = { [weak self] newStatus in
+            Task { @MainActor in self?.liveStatus = newStatus }
+        }
+        liveController.restorePersistedRegistrations()
+        Task { [weak self] in
+            await self?.reconcileLiveMode()
+            await MainActor.run { self?.startTailscaleWatcher() }
         }
     }
 
@@ -518,9 +618,21 @@ final class AppStore: ObservableObject {
         githubPollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollGitHubOnce()
-                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s
+                let interval = await MainActor.run {
+                    self?.pollIntervalNanoseconds ?? 60_000_000_000
+                }
+                try? await Task.sleep(nanoseconds: interval)
             }
         }
+    }
+
+    /// Poll cadence: 60s when live mode isn't active (today's
+    /// behavior), 300s when live mode is active (webhooks do the
+    /// heavy lifting; poll is just a reconciler for missed events).
+    @MainActor
+    var pollIntervalNanoseconds: UInt64 {
+        if case .live = liveStatus { return 300_000_000_000 }
+        return 60_000_000_000
     }
 
     func stopGitHubPolling() {
@@ -836,6 +948,7 @@ final class AppStore: ObservableObject {
         static let ghWindowMinutes = "ghWindowMinutes"
         static let ghWorkflowBlocklist = "ghWorkflowBlocklist"
         static let otherActionsExpanded = "otherActionsExpanded"
+        static let liveUpdateMode = "liveUpdateMode"
     }
 
     /// Cancel or rerun a GitHub Actions run via `gh run …`. Both are
