@@ -7,6 +7,7 @@ struct ShipCardView: View {
     @State private var hovering: Bool = false
     @State private var addLaneOpen: Bool = false
     @State private var otherChecksExpanded: Bool = false
+    @State private var showingArchiveConfirm: Bool = false
 
     init(ship: Ship) {
         self.ship = ship
@@ -239,6 +240,31 @@ struct ShipCardView: View {
         }
     }
 
+    private func confirmAndArchive() {
+        let alert = NSAlert()
+        alert.messageText = "Archive ship-state for PR #\(ship.prNumber)?"
+        let warning = isActivelyRunning
+            ? "\n\n⚠︎ This ship is actively running. Archiving will stop Shipyard from tracking it — any in-flight CI continues on GitHub but won't be visible here."
+            : ""
+        alert.informativeText = "Runs:\n  shipyard ship-state discard \(ship.prNumber)\n\nThe CLI keeps a tombstone; the ship-state file is not deleted. You can re-list it from the terminal.\(warning)"
+        alert.alertStyle = isActivelyRunning ? .critical : .warning
+        alert.addButton(withTitle: "Archive")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            store.archive(ship: ship)
+        }
+    }
+
+    private var isActivelyRunning: Bool {
+        if ship.overallStatus == .running { return true }
+        if let prState = store.prState(for: ship), !prState.isClosed {
+            if !ship.targets.isEmpty && ship.overallStatus != .passed && ship.overallStatus != .failed {
+                return true
+            }
+        }
+        return false
+    }
+
     private static func aggregateStatus(_ statuses: [TargetStatus]) -> TargetStatus {
         if statuses.contains(.failed) { return .failed }
         if statuses.contains(.running) { return .running }
@@ -341,23 +367,41 @@ struct ShipCardView: View {
 
             statusPill
 
-            // Archive button — available for any terminal or empty-runs
-            // ship. Calls `shipyard ship-state discard <pr>` under the
-            // hood so the CLI forgets the state too, not just the UI.
-            if ship.overallStatus == .passed
-               || ship.overallStatus == .failed
-               || ship.targets.isEmpty {
+            // Hide / archive menu. The icon is non-destructive by
+            // default (just hides the card from this list). The
+            // archive-to-disk option lives behind a menu item with
+            // explicit confirmation — so a stray click can never
+            // accidentally interrupt an active runner.
+            Menu {
                 Button {
-                    store.archive(ship: ship)
+                    store.dismiss(ship: ship)
                 } label: {
-                    Image(systemName: "archivebox.fill")
-                        .foregroundStyle(.tertiary)
-                        .font(.system(size: 11))
+                    Label("Hide from this list", systemImage: "eye.slash")
                 }
-                .buttonStyle(.plain)
-                .help("Archive this ship-state (calls `shipyard ship-state discard \(ship.prNumber)`)")
-                .opacity(hovering ? 1 : 0.4)
+                if ship.overallStatus == .passed
+                    || ship.overallStatus == .failed
+                    || (store.prState(for: ship)?.isClosed == true)
+                    || ship.targets.isEmpty {
+                    Divider()
+                    Button(role: .destructive) {
+                        confirmAndArchive()
+                    } label: {
+                        Label(
+                            "Archive on disk (shipyard ship-state discard)",
+                            systemImage: "archivebox"
+                        )
+                    }
+                }
+            } label: {
+                Image(systemName: "eye.slash")
+                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 11))
             }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Hide this card (click). Right-click / long-press for Archive.")
+            .opacity(hovering ? 1 : 0.4)
         }
     }
 
