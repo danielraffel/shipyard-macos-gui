@@ -1,4 +1,4 @@
-# Shipyard macOS
+# Shipyard MenuBar for macOS
 
 A native macOS menu-bar companion for [Shipyard](https://github.com/danielraffel/Shipyard) — the cross-platform CI controller.
 
