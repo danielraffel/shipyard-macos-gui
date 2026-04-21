@@ -11,8 +11,8 @@ struct ShipCardView: View {
         self.ship = ship
         // Default expanded when there's content: either shipyard
         // target rows OR nested GitHub Actions runs for this PR.
-        // We can't read the store here, so we re-evaluate via
-        // .onAppear below as a safety net.
+        // We can't read the store here, so .onAppear re-syncs both
+        // expand-all state and the "has activity" signal.
         self._expanded = State(initialValue: !ship.targets.isEmpty)
     }
 
@@ -53,19 +53,17 @@ struct ShipCardView: View {
         )
         .onHover { hovering = $0 }
         .onAppear {
-            // Kick off a branch-scoped gh run list so we pick up
-            // runs for this PR even if they're outside the repo-wide
-            // top-100 slice (common for older PRs in fast-moving
-            // repos like pulp).
+            // Kick off branch-scoped fetch + PR state fetch on first
+            // render. These populate data the rest of the card reads.
             store.fetchRunsForShipOnDemand(ship)
-            // Check the PR's actual state on GitHub (OPEN / CLOSED /
-            // MERGED). A ship-state for a merged PR shouldn't show
-            // "awaiting CI" — it should show "merged".
             store.fetchPRStateIfNeeded(for: ship)
-            // If this card has nested Actions but no ship-state
-            // targets, default to expanded so the user actually sees
-            // that there's activity. Without this, cards look empty.
-            if ship.targets.isEmpty && !store.githubRuns(for: ship).isEmpty {
+            // Honour the user's most-recent expand-all / collapse-all
+            // action if they pressed it BEFORE this card scrolled into
+            // view (LazyVStack defers creation, so .onChange wouldn't
+            // fire for off-screen cards).
+            if store.expandAllTick > 0 {
+                expanded = store.expandAllState
+            } else if ship.targets.isEmpty && !store.githubRuns(for: ship).isEmpty {
                 expanded = true
             }
         }

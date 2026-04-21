@@ -156,7 +156,15 @@ final class AppStore: ObservableObject {
     }
 
     func clearCompleted() {
-        ships.removeAll { $0.overallStatus == .passed || $0.overallStatus == .failed }
+        ships.removeAll { ship in
+            if ship.overallStatus == .passed || ship.overallStatus == .failed {
+                return true
+            }
+            if let pr = prState(for: ship), pr.isClosed {
+                return true
+            }
+            return false
+        }
     }
 
     func toggleAutoMerge(for ship: Ship) {

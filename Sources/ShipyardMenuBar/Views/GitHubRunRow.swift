@@ -16,43 +16,50 @@ struct GitHubRunRow: View {
     var body: some View {
         HStack(spacing: 8) {
             statusIcon
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(run.workflowName)
-                        .font(.system(size: compact ? 10 : 11, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    if !compact && !run.headBranch.isEmpty {
-                        Text("· \(run.headBranch)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+            // The whole informational block is a button that opens
+            // the run on github.com — much bigger tap target than the
+            // tiny arrow icon.
+            Button {
+                if let url = run.url { NSWorkspace.shared.open(url) }
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 4) {
+                            Text(run.workflowName)
+                                .font(.system(size: compact ? 10 : 11, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            if !compact && !run.headBranch.isEmpty {
+                                Text("· \(run.headBranch)")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            providerPills
+                        }
+                        Text(relative(run.createdAt))
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
                     }
-                    providerPills
+                    Spacer()
                 }
-                Text(relative(run.createdAt))
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
             }
-            Spacer()
-            // Reserve constant space for action buttons to prevent
-            // layout shift when hovering.
+            .buttonStyle(.plain)
+            .help("Open on github.com — \(run.conclusion ?? run.status)")
+
+            // Hover actions. Reserved width so row doesn't reshape.
             HStack(spacing: 6) {
                 if hovering {
                     actionButtons
                 }
-            }
-            .frame(minWidth: 32, alignment: .trailing)
-            Button {
-                if let url = run.url { NSWorkspace.shared.open(url) }
-            } label: {
                 Image(systemName: "arrow.up.forward.app")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
+                    .opacity(0.5)
             }
-            .buttonStyle(.plain)
-            .help("Open on github.com")
+            .frame(minWidth: 40, alignment: .trailing)
         }
         .padding(.vertical, compact ? 2 : 4)
         .padding(.horizontal, 4)
@@ -62,20 +69,16 @@ struct GitHubRunRow: View {
     }
 
     /// One small pill per distinct runner provider used by this run's
-    /// jobs. Shows "…" as a placeholder while we're fetching jobs; the
-    /// placeholder disappears when jobs load. Gives the user a direct
-    /// answer to "is this on namespace?" for every run.
+    /// jobs. Shows nothing while jobs are loading (don't bother the
+    /// user with "…"). When loaded, hides "unknown" provider pills
+    /// since they add noise without insight — if gh/labels didn't
+    /// reveal what infra it ran on, the UI shouldn't pretend to know.
     @ViewBuilder
     private var providerPills: some View {
         if let providers = store.providers(for: run) {
-            ForEach(providers, id: \.self) { provider in
+            ForEach(providers.filter { $0 != "unknown" }, id: \.self) { provider in
                 providerPill(for: provider)
             }
-        } else {
-            // Still loading jobs — subtle placeholder
-            Text("…")
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
         }
     }
 

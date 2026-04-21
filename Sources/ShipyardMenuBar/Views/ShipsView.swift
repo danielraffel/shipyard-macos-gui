@@ -74,8 +74,17 @@ struct ShipsView: View {
     }
 
     private var completedCount: Int {
-        visibleShips.filter {
-            $0.overallStatus == .passed || $0.overallStatus == .failed
+        visibleShips.filter { ship in
+            // Terminal at the shipyard level…
+            if ship.overallStatus == .passed || ship.overallStatus == .failed {
+                return true
+            }
+            // …or the PR has been closed/merged on github.com even
+            // if the local ship-state thinks it's still pending.
+            if let pr = store.prState(for: ship), pr.isClosed {
+                return true
+            }
+            return false
         }.count
     }
 
