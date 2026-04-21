@@ -412,6 +412,22 @@ final class AppStore: ObservableObject {
         return uniq
     }
 
+    /// When a ship has no dispatched_runs of its own but GitHub did
+    /// run CI via push triggers, compute the ship's effective status
+    /// from the nested GitHub runs. This turns a misleading "not
+    /// dispatched" pill into an accurate "running" / "green" /
+    /// "failed" pill. Returns nil if there are no nested runs yet.
+    func derivedStatusFromGitHub(for ship: Ship) -> TargetStatus? {
+        let runs = githubRuns(for: ship)
+        guard !runs.isEmpty else { return nil }
+        if runs.contains(where: { $0.isFailure }) { return .failed }
+        if runs.contains(where: { $0.isRunning }) { return .running }
+        if runs.allSatisfy({ $0.conclusion == "success" || $0.conclusion == "skipped" }) {
+            return .passed
+        }
+        return .pending
+    }
+
     /// GitHub Actions runs that do NOT belong to any ship card. These
     /// are tag-triggered workflows (auto-release, release), scheduled
     /// workflows (post-tag-sync), direct pushes to main, or runs for

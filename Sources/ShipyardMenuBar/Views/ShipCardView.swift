@@ -94,15 +94,20 @@ struct ShipCardView: View {
     }
 
     private var emptyTargetsRow: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "info.circle")
+        let hasGH = !store.githubRuns(for: ship).isEmpty
+        return HStack(spacing: 6) {
+            Image(systemName: hasGH ? "bolt.circle" : "info.circle")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Shipyard didn't dispatch anything")
+                Text(hasGH
+                     ? "CI running on GitHub Actions"
+                     : "No local dispatch")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                Text("`shipyard ship` recorded this ship-state but its dispatched_runs is empty. GitHub may still have run CI for this branch — see below.")
+                Text(hasGH
+                     ? "Shipyard pushed the branch; GitHub Actions picked up CI on its own via push triggers. See the runs below."
+                     : "`shipyard ship` recorded this state but didn't dispatch any targets locally — and no GitHub Actions runs have arrived yet for this branch.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .lineLimit(3)
@@ -252,10 +257,23 @@ struct ShipCardView: View {
     }
 
     private var statusPill: some View {
+        // Effective status: if shipyard didn't dispatch locally but
+        // GitHub Actions ran (via push triggers), use THAT as the
+        // ship's effective status. This is the normal case for pulp
+        // PRs where `shipyard ship` just pushes the branch and CI
+        // auto-triggers on the PR event.
+        let effective: TargetStatus = {
+            if ship.targets.isEmpty,
+               let derived = store.derivedStatusFromGitHub(for: ship) {
+                return derived
+            }
+            return ship.overallStatus
+        }()
+
         let label: String
         let color: Color
         let icon: String?
-        switch ship.overallStatus {
+        switch effective {
         case .passed:
             label = "green"; color = ShipyardColors.green
             icon = "arrow.trianglehead.merge"
@@ -269,9 +287,10 @@ struct ShipCardView: View {
             label = "skipped"; color = .secondary; icon = nil
         case .pending:
             // Distinguish "queued with targets declared, waiting to run"
-            // from "no targets dispatched at all" (orphaned state).
+            // from "nothing dispatched locally and no GH runs yet"
+            // (orphaned or very recent).
             if ship.targets.isEmpty {
-                label = "not dispatched"; color = .secondary; icon = nil
+                label = "awaiting CI"; color = .secondary; icon = nil
             } else {
                 label = "queued"; color = .secondary; icon = nil
             }
