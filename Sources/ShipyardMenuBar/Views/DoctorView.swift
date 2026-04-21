@@ -30,11 +30,25 @@ struct DoctorView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                     if let desktopVersion = Self.desktopAppVersion() {
-                        Text("Desktop app: \(desktopVersion)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                            .textSelection(.enabled)
-                            .padding(.top, 2)
+                        HStack(spacing: 6) {
+                            Text("Desktop app: \(desktopVersion)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                                .textSelection(.enabled)
+                            Button {
+                                ClipboardToast.shared.copy(
+                                    diagnosticsDump(desktopVersion: desktopVersion),
+                                    label: "Copied diagnostics"
+                                )
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy desktop version + every Doctor row as a diagnostics bundle")
+                        }
+                        .padding(.top, 2)
                     }
                 }
                 .padding(.top, 10)
@@ -183,6 +197,33 @@ struct DoctorView: View {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Build a one-block plaintext diagnostics bundle suitable for pasting
+    /// into an issue / Slack / DM. Includes the desktop version, every
+    /// Doctor section + entry (name / version / detail), and the current
+    /// shipyard CLI path. Intentionally plain text, not markdown, so it
+    /// reads cleanly wherever it's pasted.
+    private func diagnosticsDump(desktopVersion: String) -> String {
+        var lines: [String] = []
+        lines.append("Desktop app: \(desktopVersion)")
+        if let cli = store.cliBinaryResolved {
+            lines.append("Shipyard CLI path: \(cli)")
+        }
+        if let result = store.doctorResult {
+            lines.append("Doctor: \(result.ok ? "Ready" : "Issues detected")")
+            for section in result.sections {
+                lines.append("")
+                lines.append("[\(section.name)]")
+                for entry in section.entries {
+                    var row = "\(entry.ok ? "✓" : "✗") \(entry.name)"
+                    if let v = entry.version { row += " — \(v)" }
+                    if let d = entry.detail, !d.isEmpty { row += " — \(d)" }
+                    lines.append(row)
+                }
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Returns a short version string for the running desktop app bundle,
