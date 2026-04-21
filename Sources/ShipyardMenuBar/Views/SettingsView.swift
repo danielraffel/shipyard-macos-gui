@@ -51,17 +51,23 @@ struct SettingsView: View {
     private var liveStatusRow: some View {
         switch store.liveStatus {
         case .live(let url, let lastEventAt):
-            HStack(spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "dot.radiowaves.left.and.right")
                     .foregroundStyle(.green)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Live · via Tailscale Funnel")
                         .font(.system(size: 11, weight: .medium))
-                    Text(liveStatusDetail(url: url, lastEventAt: lastEventAt))
+                    Text(liveStatusDetail(lastEventAt: lastEventAt))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
+                    // URL on its own line so the hostname doesn't get
+                    // middle-truncated away.
+                    Text(url.host ?? url.absoluteString)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .truncationMode(.tail)
+                        .textSelection(.enabled)
                 }
             }
         case .polling(let reason):
@@ -105,7 +111,7 @@ struct SettingsView: View {
         return .secondary
     }
 
-    private func liveStatusDetail(url: URL, lastEventAt: Date?) -> String {
+    private func liveStatusDetail(lastEventAt: Date?) -> String {
         if let last = lastEventAt {
             let f = RelativeDateTimeFormatter()
             f.unitsStyle = .short
@@ -114,7 +120,7 @@ struct SettingsView: View {
         // The tunnel is up + webhooks are registered — but we haven't
         // received a delivery since the app launched. Don't imply the
         // tunnel is broken; events only arrive when GitHub fires them.
-        return "tunnel active · no events yet this session · \(url.host ?? url.absoluteString)"
+        return "tunnel active · no events yet this session"
     }
 
     private var githubSection: some View {
