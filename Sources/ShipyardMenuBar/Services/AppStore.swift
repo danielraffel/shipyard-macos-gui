@@ -200,11 +200,14 @@ final class AppStore: ObservableObject {
     /// + every 60s while the app is open.
     @Published private(set) var tailscaleStatus: TailscaleStatus?
 
-    private let liveController = LiveModeController()
+    private let liveController = DaemonClient()
     private var tailscaleProbeTask: Task<Void, Never>?
 
-    /// Re-probe Tailscale and reconcile the live controller. Safe to
-    /// call from anywhere — handles its own @MainActor hop.
+    /// Re-probe Tailscale and reconcile the daemon client. The live-
+    /// mode pipeline (webhook server, tunnel, registrations) now runs
+    /// in the shipyard CLI as `shipyard daemon`; this method is the
+    /// GUI-side driver that decides whether to spawn + subscribe.
+    /// Safe to call from anywhere — handles its own @MainActor hop.
     func reconcileLiveMode() async {
         let probe = await TailscaleProbe.probe()
         await MainActor.run {
@@ -213,11 +216,8 @@ final class AppStore: ObservableObject {
         await liveController.reconcile(
             mode: liveUpdateMode,
             tailscale: probe,
-            repos: Set(ships.map(\.repo)).filter { !$0.isEmpty }.union(knownRepos),
-            ghBinary: resolveGHBinary()
-        ) { [weak self] event in
-            self?.apply(webhookEvent: event)
-        }
+            repos: Set(ships.map(\.repo)).filter { !$0.isEmpty }.union(knownRepos)
+        )
         await MainActor.run {
             self.liveStatus = self.liveController.status
         }
@@ -542,7 +542,9 @@ final class AppStore: ObservableObject {
         liveController.onStatusChange = { [weak self] newStatus in
             Task { @MainActor in self?.liveStatus = newStatus }
         }
-        liveController.restorePersistedRegistrations()
+        liveController.onEvent = { [weak self] event in
+            self?.apply(webhookEvent: event)
+        }
         Task { [weak self] in
             await self?.reconcileLiveMode()
             await MainActor.run { self?.startTailscaleWatcher() }
