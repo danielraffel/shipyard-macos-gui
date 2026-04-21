@@ -76,6 +76,9 @@ struct ShipCardView: View {
                 store.fetchRunsForShipOnDemand(ship)
             }
         }
+        .onChange(of: store.expandAllTick) { _ in
+            expanded = store.expandAllState
+        }
     }
 
     @ViewBuilder

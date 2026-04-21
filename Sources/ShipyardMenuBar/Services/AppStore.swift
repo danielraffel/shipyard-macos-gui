@@ -64,6 +64,16 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(otherActionsExpanded, forKey: Keys.otherActionsExpanded) }
     }
 
+    /// Bumped when the user clicks "expand all" or "collapse all" in
+    /// the header. Ship cards listen and update their local expanded
+    /// state.
+    @Published var expandAllTick: Int = 0
+    @Published var expandAllState: Bool = true
+    func setAllExpanded(_ expanded: Bool) {
+        expandAllState = expanded
+        expandAllTick += 1
+    }
+
     @Published var showGitHubActions: Bool = UserDefaults.standard.object(forKey: Keys.showGitHubActions) as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(showGitHubActions, forKey: Keys.showGitHubActions)
@@ -254,10 +264,33 @@ final class AppStore: ObservableObject {
         }
 
         hiddenStaleCount = hidden
+        // Sort by activity priority so the most actionable items
+        // bubble to the top: running → failed → queued → green →
+        // merged/closed. Within a bucket, most recently updated first.
         ships = (showStale ? updated : filtered)
-            .sorted { $0.prNumber < $1.prNumber }
+            .sorted { a, b in
+                let ap = activityRank(for: a)
+                let bp = activityRank(for: b)
+                if ap != bp { return ap < bp }
+                return a.startedAt > b.startedAt
+            }
         knownRepos.formUnion(updated.map(\.repo).filter { !$0.isEmpty })
         detectBadgeTransition()
+    }
+
+    /// Lower rank = higher in the list. Uses PR state when we have it
+    /// so merged PRs always sink; otherwise ranks by overall status.
+    private func activityRank(for ship: Ship) -> Int {
+        if let prState = prState(for: ship), prState.isMerged { return 90 }
+        if let prState = prState(for: ship), prState.isClosed { return 95 }
+        switch ship.overallStatus {
+        case .running: return 10
+        case .failed:  return 20
+        case .pending: return 40 // queued / awaiting CI
+        case .reused:  return 50
+        case .skipped: return 60
+        case .passed:  return 70
+        }
     }
 
     private func detectBadgeTransition() {

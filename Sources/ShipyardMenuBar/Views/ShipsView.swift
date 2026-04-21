@@ -92,6 +92,24 @@ struct ShipsView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             Spacer()
+            Button {
+                store.setAllExpanded(true)
+            } label: {
+                Image(systemName: "chevron.down.2")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Expand all cards")
+            Button {
+                store.setAllExpanded(false)
+            } label: {
+                Image(systemName: "chevron.up.2")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Collapse all cards")
             if completedCount > 0 {
                 Button("Clear \(completedCount) completed") {
                     store.clearCompleted()
