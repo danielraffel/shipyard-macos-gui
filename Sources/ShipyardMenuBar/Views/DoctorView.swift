@@ -29,6 +29,13 @@ struct DoctorView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                    if let desktopVersion = Self.desktopAppVersion() {
+                        Text("Desktop app: \(desktopVersion)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                            .textSelection(.enabled)
+                            .padding(.top, 2)
+                    }
                 }
                 .padding(.top, 10)
             }
@@ -176,5 +183,23 @@ struct DoctorView: View {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Returns a short version string for the running desktop app bundle,
+    /// e.g. `"0.1.2 (build 42)"`. Returns nil if neither key is readable,
+    /// which lets the caller skip rendering the row.
+    ///
+    /// Surfaced in the Doctor footer so users can answer "am I running the
+    /// fixed build?" without inspecting the .app bundle or Finder Get Info.
+    static func desktopAppVersion() -> String? {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let short = info["CFBundleShortVersionString"] as? String
+        let build = info["CFBundleVersion"] as? String
+        switch (short, build) {
+        case let (.some(s), .some(b)) where s != b: return "\(s) (build \(b))"
+        case let (.some(s), _):                     return s
+        case let (_, .some(b)):                     return "build \(b)"
+        default:                                    return nil
+        }
     }
 }

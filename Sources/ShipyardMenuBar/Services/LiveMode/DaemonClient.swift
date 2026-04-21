@@ -149,10 +149,24 @@ final class DaemonClient {
     }
 
     private static func resolveShipyardBinary() -> String? {
+        // First: honor the user's explicit override from Settings. This
+        // mirrors AppStore.resolveCLIBinary()'s first branch so that a
+        // custom path set in Settings is respected by the daemon spawn
+        // too (the two lookups were accidentally divergent prior).
+        let override = UserDefaults.standard.string(forKey: "cliBinaryPath") ?? ""
+        if !override.isEmpty,
+           FileManager.default.isExecutableFile(atPath: override) {
+            return override
+        }
+        // Then: canonical install.sh location (`~/.local/bin/shipyard`)
+        // and the other paths AppStore already checks. Order matches
+        // AppStore.resolveCLIBinary so daemon spawn and general CLI
+        // resolution land on the same binary.
         let candidates = [
-            NSHomeDirectory() + "/.pulp/bin/shipyard",
             "/usr/local/bin/shipyard",
             "/opt/homebrew/bin/shipyard",
+            NSHomeDirectory() + "/.pulp/bin/shipyard",
+            NSHomeDirectory() + "/.local/bin/shipyard",
         ]
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
