@@ -400,8 +400,8 @@ struct ShipCardView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Hide this card (click). Right-click / long-press for Archive.")
-            .opacity(hovering ? 1 : 0.4)
+            .help("Hide this card (click). Menu includes Archive with confirmation.")
+            .opacity(hovering ? 1 : 0.75)
         }
     }
 

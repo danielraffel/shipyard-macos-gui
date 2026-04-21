@@ -262,16 +262,37 @@ final class AppStore: ObservableObject {
         dismiss(ship: ship)
     }
 
+    /// Sweeps terminal / closed ships out of the local view. Runs in
+    /// two passes so it clears what we KNOW about first, then retries
+    /// after proactively fetching PR state for any ship the first
+    /// pass couldn't decide on.
     func clearCompleted() {
-        ships.removeAll { ship in
-            if ship.overallStatus == .passed || ship.overallStatus == .failed {
-                return true
-            }
-            if let pr = prState(for: ship), pr.isClosed {
-                return true
-            }
-            return false
+        // Pass 1: remove anything we can decide on right now.
+        ships.removeAll { isCompleted($0) }
+
+        // Pass 2: kick off PR-state fetches for remaining ships and
+        // clear again when they come in. Fire-and-forget — the @Published
+        // prStateByKey update triggers a re-render on its own; the user
+        // can click Clear again if they want to sweep mid-refresh.
+        for ship in ships where !ship.dismissed {
+            fetchPRStateIfNeeded(for: ship)
         }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await MainActor.run {
+                self?.ships.removeAll { self?.isCompleted($0) == true }
+            }
+        }
+    }
+
+    private func isCompleted(_ ship: Ship) -> Bool {
+        if ship.overallStatus == .passed || ship.overallStatus == .failed {
+            return true
+        }
+        if let pr = prState(for: ship), pr.isClosed {
+            return true
+        }
+        return false
     }
 
     func toggleAutoMerge(for ship: Ship) {
@@ -356,6 +377,14 @@ final class AppStore: ObservableObject {
                 ship.autoMerge = existing.autoMerge
             }
             updated.append(ship)
+        }
+
+        // Proactively prime PR state for every ship we haven't
+        // fetched yet. Otherwise "Clear N completed" under-reports
+        // because merged/closed ships whose state hasn't been
+        // fetched look like "still in flight" to the filter.
+        for ship in updated {
+            fetchPRStateIfNeeded(for: ship)
         }
 
         // Auto-clear stale terminal ships. `shipyard ship-state list`
