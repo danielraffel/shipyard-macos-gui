@@ -170,27 +170,22 @@ struct ShipCardView: View {
                 withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
             }
 
-            // Per-lane status dots — one dot per shipyard target or,
-            // when those aren't populated, per nested GitHub Actions
-            // workflow run. Matches the design prototype's at-a-
-            // glance summary. Collapsed state only (expanded card has
-            // the full rows).
+            // Per-platform status dots (macOS, Linux, Windows, iOS,
+            // Android). One dot per OS family, aggregating across
+            // shipyard targets AND nested GitHub Actions matrix jobs.
+            // Answers the question "did the runners I configured
+            // pass?" at a glance.
             if !expanded {
                 let dots = summaryDots()
                 if !dots.isEmpty {
                     HStack(spacing: 3) {
-                        ForEach(Array(dots.prefix(8).enumerated()), id: \.offset) { _, color in
+                        ForEach(Array(dots.enumerated()), id: \.offset) { _, d in
                             Circle()
-                                .fill(color)
+                                .fill(d.color)
                                 .frame(width: 6, height: 6)
-                        }
-                        if dots.count > 8 {
-                            Text("+\(dots.count - 8)")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
+                                .help(d.tooltip)
                         }
                     }
-                    .help("\(dots.count) lane\(dots.count == 1 ? "" : "s") — expand card for detail")
                 }
             }
 
@@ -354,31 +349,73 @@ struct ShipCardView: View {
         return f.localizedString(for: date, relativeTo: Date())
     }
 
-    /// Compute a flat list of status colors, one per lane, for the
-    /// dot summary. Uses shipyard targets when present; falls back to
-    /// nested GitHub Actions workflow runs.
-    private func summaryDots() -> [Color] {
-        if !ship.targets.isEmpty {
-            return ship.targets.map(dotColorForTarget)
+    /// Per-PLATFORM status dots (not per workflow / per job). Groups
+    /// every lane the app knows about — shipyard targets + nested
+    /// GitHub Actions matrix jobs — by OS family and emits one dot
+    /// per family colored by the worst status in that family.
+    /// So pulp's "macOS (ARM64)" + "macos" + whatever else collapse
+    /// to a single macOS dot instead of three.
+    private func summaryDots() -> [(color: Color, tooltip: String)] {
+        var statuses: [String: [TargetStatus]] = [:]
+        for target in ship.targets {
+            guard let key = Self.platformKey(target.name) else { continue }
+            statuses[key, default: []].append(target.status)
         }
-        return store.githubRuns(for: ship).map(dotColorForRun)
+        for run in store.githubRuns(for: ship) {
+            for job in store.jobsByRunId[run.id] ?? [] {
+                guard let key = Self.platformKey(job.name) else { continue }
+                statuses[key, default: []].append(Self.mapJobStatus(job))
+            }
+        }
+        let order = ["macos", "linux", "windows", "ios", "android", "tvos", "watchos"]
+        return order.compactMap { key in
+            guard let arr = statuses[key], !arr.isEmpty else { return nil }
+            let color = Self.aggregateColor(arr)
+            let label = key.capitalized
+            let summary = Self.summaryText(arr)
+            return (color, "\(label): \(summary)")
+        }
     }
 
-    private func dotColorForTarget(_ t: Target) -> Color {
-        switch t.status {
-        case .passed: return ShipyardColors.green
-        case .failed: return ShipyardColors.red
-        case .running: return ShipyardColors.blue
-        case .reused: return ShipyardColors.purple
-        case .skipped: return .secondary.opacity(0.4)
-        case .pending: return .secondary.opacity(0.4)
+    private static func platformKey(_ raw: String) -> String? {
+        let l = raw.lowercased()
+        if l.contains("macos") || l == "mac" || l.hasPrefix("mac ") || l.hasPrefix("mac-") { return "macos" }
+        if l.contains("linux") || l.contains("ubuntu") || l.contains("debian") { return "linux" }
+        if l.contains("windows") || l == "win" { return "windows" }
+        if l.contains("ios") && !l.contains("macos") { return "ios" }
+        if l.contains("android") { return "android" }
+        if l.contains("tvos") { return "tvos" }
+        if l.contains("watchos") { return "watchos" }
+        return nil
+    }
+
+    private static func mapJobStatus(_ job: GitHubJob) -> TargetStatus {
+        switch job.status {
+        case "completed":
+            if job.conclusion == "success" { return .passed }
+            if job.conclusion == "skipped" { return .skipped }
+            return .failed
+        case "in_progress": return .running
+        case "queued", "waiting", "pending": return .pending
+        default: return .pending
         }
     }
 
-    private func dotColorForRun(_ r: GitHubRun) -> Color {
-        if r.isRunning { return ShipyardColors.blue }
-        if r.isFailure { return ShipyardColors.red }
-        if r.conclusion == "success" { return ShipyardColors.green }
-        return .secondary.opacity(0.4)
+    private static func aggregateColor(_ statuses: [TargetStatus]) -> Color {
+        if statuses.contains(.failed) { return ShipyardColors.red }
+        if statuses.contains(.running) { return ShipyardColors.blue }
+        if statuses.allSatisfy({ $0 == .passed || $0 == .skipped || $0 == .reused }) {
+            return ShipyardColors.green
+        }
+        return .secondary.opacity(0.5)
+    }
+
+    private static func summaryText(_ statuses: [TargetStatus]) -> String {
+        if statuses.contains(.failed) { return "one or more lanes failing" }
+        if statuses.contains(.running) { return "running" }
+        if statuses.allSatisfy({ $0 == .passed || $0 == .skipped || $0 == .reused }) {
+            return "all green"
+        }
+        return "pending"
     }
 }
