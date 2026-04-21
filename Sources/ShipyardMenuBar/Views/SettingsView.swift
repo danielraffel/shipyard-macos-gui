@@ -111,7 +111,10 @@ struct SettingsView: View {
             f.unitsStyle = .short
             return "last event \(f.localizedString(for: last, relativeTo: Date()))"
         }
-        return "waiting for first event · \(url.host ?? url.absoluteString)"
+        // The tunnel is up + webhooks are registered — but we haven't
+        // received a delivery since the app launched. Don't imply the
+        // tunnel is broken; events only arrive when GitHub fires them.
+        return "tunnel active · no events yet this session · \(url.host ?? url.absoluteString)"
     }
 
     private var githubSection: some View {

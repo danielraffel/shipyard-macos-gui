@@ -134,15 +134,16 @@ final class LiveModeController {
             ) else {
                 return .unauthorized
             }
-            let eventHeader = headers["x-github-event"]
-            if let event = WebhookEventDecoder.decode(
-                eventHeader: eventHeader,
+            let event = WebhookEventDecoder.decode(
+                eventHeader: headers["x-github-event"],
                 body: body
-            ) {
-                DispatchQueue.main.async {
-                    self?.recordDelivery()
-                    handleEvent(event)
-                }
+            )
+            // Record delivery even when the event decodes to nil or
+            // `.unhandled` — a validly-signed POST is itself the
+            // liveness signal the UI cares about.
+            DispatchQueue.main.async {
+                self?.recordDelivery()
+                if let event { handleEvent(event) }
             }
             return .ok
         }

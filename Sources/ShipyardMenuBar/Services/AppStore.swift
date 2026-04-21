@@ -43,28 +43,54 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(groupByWorktree, forKey: Keys.groupByWorktree) }
     }
 
-    /// Opt-in: when true, a ship card opens by default if it has any
-    /// content to show (shipyard targets OR cached GH runs on the
-    /// ship's branch/SHA). Off by default — the predictable "all
-    /// collapsed" layout is the baseline.
+    /// Opt-in: when true, any PR that's actively being worked on
+    /// (see `isActivelyWorkedOn`) expands automatically. Session-
+    /// sticky — once expanded, stays expanded unless the user
+    /// collapses or the app quits.
     @Published var autoExpandActivePRs: Bool = UserDefaults.standard.bool(forKey: Keys.autoExpandActivePRs) {
-        didSet { UserDefaults.standard.set(autoExpandActivePRs, forKey: Keys.autoExpandActivePRs) }
+        didSet {
+            UserDefaults.standard.set(autoExpandActivePRs, forKey: Keys.autoExpandActivePRs)
+            if autoExpandActivePRs {
+                reseedAutoExpand()
+            }
+        }
+    }
+
+    /// For every ship that doesn't have an explicit expanded/collapsed
+    /// choice yet, seed to expanded if it qualifies as "actively
+    /// worked on." Safe to call repeatedly — idempotent once a PR has
+    /// an explicit value (either user-set or previously seeded).
+    /// Called after any data arrival that could flip `isActivelyWorkedOn`:
+    /// ship snapshots, repo-wide GH polls, branch-scoped fetches, job
+    /// fetches. Without this, the first ShipCardView.onAppear fires
+    /// before GH data lands and the seed never catches active PRs.
+    func reseedAutoExpand() {
+        guard autoExpandActivePRs else { return }
+        for ship in ships {
+            if prExpansionState[ship.prNumber] == nil,
+               isActivelyWorkedOn(ship) {
+                prExpansionState[ship.prNumber] = true
+            }
+        }
     }
 
     /// Is this PR actively being worked on right now? Drives the
     /// auto-expand default when the setting is on.
     ///
-    /// "Active" means one of:
-    ///  - PR is open on github.com (not merged or closed), AND
-    ///  - has shipyard targets, OR
-    ///  - has a currently-running GitHub Actions run, OR
-    ///  - has any GitHub Actions run updated within the last 30 min.
+    /// "Active" means all of:
+    ///  - PR state has been fetched from github.com (so we actually
+    ///    know whether it's open or closed), AND
+    ///  - PR is open, AND
+    ///  - has shipyard targets, OR has a currently-running GitHub
+    ///    Actions run, OR has any GH run updated within 30 min.
     ///
-    /// Merged/closed PRs are excluded even if they transitioned in
-    /// the last 30 min — once they're terminal there's nothing
-    /// active to watch.
+    /// The "PR state fetched" gate keeps us from seeding merged PRs
+    /// as active during the brief window between ship list load and
+    /// PR-state fetch. Once state arrives, `reseedAutoExpand` runs
+    /// again and picks up any genuinely active PR.
     func isActivelyWorkedOn(_ ship: Ship) -> Bool {
-        if let pr = prState(for: ship), pr.isClosed { return false }
+        guard let pr = prState(for: ship) else { return false }
+        if pr.isClosed { return false }
         if !ship.targets.isEmpty { return true }
         let cutoff = Date().addingTimeInterval(-30 * 60)
         let branchKey = "\(ship.repo)\t\(ship.branch)"
@@ -212,36 +238,110 @@ final class AppStore: ObservableObject {
     }
 
     /// Translate a decoded webhook event into an AppStore mutation.
-    /// The actual evictions of cached jobs/runs piggyback on the
-    /// existing reconcile path so the UI stays consistent with what
-    /// polling would have produced.
-    private func apply(webhookEvent event: WebhookEvent) {
+    ///
+    /// IMPORTANT: webhooks already carry the authoritative state for
+    /// the thing that changed. We must NOT shell out to `gh api` in
+    /// response — a busy PR can easily fire 50+ workflow_run/job
+    /// events per hour, and one `gh api` call per event obliterates
+    /// the 5,000/hr user rate-limit within a day.
+    ///
+    /// So: mutate the in-memory caches directly from the payload.
+    /// The next TTL-gated poll fills in anything we couldn't reconstruct
+    /// from the webhook alone.
+    /// Internal for tests — see LiveModeRateLimitTests.
+    func apply(webhookEvent event: WebhookEvent) {
         switch event {
         case .workflowRun(let p):
-            // Drop cached jobs for this run so the next render refreshes
-            // per-platform dots from fresh data.
-            jobsByRunId.removeValue(forKey: p.runId)
-            // Kick a lightweight branch fetch to pull the updated run
-            // back into cache. force:true bypasses the rate-limit TTL.
-            if let ship = ships.first(where: { $0.repo == p.repo && $0.branch == p.headBranch }) {
-                fetchRunsForShipOnDemand(ship, force: true)
-            }
+            mergeWebhookRun(p)
         case .workflowJob(let p):
-            jobsByRunId.removeValue(forKey: p.runId)
-            // Also re-fetch jobs for this run so the per-platform
-            // rollup reflects the new status immediately.
-            if let existing = githubRunsByRepo[p.repo]?.first(where: { $0.id == p.runId }) {
-                fetchJobsIfNeeded(for: existing)
-            }
+            mergeWebhookJob(p)
         case .pullRequest(let p):
-            // Drop cached PR state so the next render re-fetches.
-            let key = prKey(repo: p.repo, pr: p.number)
-            prStateByKey.removeValue(forKey: key)
-            if let ship = ships.first(where: { $0.repo == p.repo && $0.prNumber == p.number }) {
-                fetchPRStateIfNeeded(for: ship)
-            }
+            mergeWebhookPullRequest(p)
         case .unhandled:
             break
+        }
+    }
+
+    /// Patch the cached `GitHubRun` in place from a workflow_run
+    /// webhook payload. Zero `gh api` calls.
+    private func mergeWebhookRun(_ p: WebhookEvent.WorkflowRunPayload) {
+        patchCachedRun(runId: p.runId, repo: p.repo, branch: p.headBranch) { old in
+            GitHubRun(
+                id: old.id,
+                repo: old.repo,
+                workflowName: old.workflowName,
+                headBranch: old.headBranch,
+                headSha: old.headSha,
+                status: p.status,
+                conclusion: p.conclusion,
+                url: old.url,
+                createdAt: old.createdAt,
+                updatedAt: Date()
+            )
+        }
+    }
+
+    /// Patch the cached `GitHubJob` in place from a workflow_job
+    /// webhook payload. Zero `gh api` calls.
+    private func mergeWebhookJob(_ p: WebhookEvent.WorkflowJobPayload) {
+        guard var jobs = jobsByRunId[p.runId] else { return }
+        guard let idx = jobs.firstIndex(where: { $0.databaseId == p.jobId }) else {
+            return
+        }
+        let old = jobs[idx]
+        jobs[idx] = GitHubJob(
+            databaseId: old.databaseId,
+            name: old.name,
+            status: p.status,
+            conclusion: p.conclusion,
+            labels: p.labels.isEmpty ? old.labels : p.labels,
+            runnerName: p.runnerName ?? old.runnerName
+        )
+        jobsByRunId[p.runId] = jobs
+    }
+
+    /// Build `PRState` directly from the pull_request webhook payload.
+    /// Skips the `gh pr view` call entirely.
+    private func mergeWebhookPullRequest(_ p: WebhookEvent.PullRequestPayload) {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallback = ISO8601DateFormatter()
+        fallback.formatOptions = [.withInternetDateTime]
+        func parse(_ s: String?) -> Date? {
+            guard let s, !s.isEmpty else { return nil }
+            return fmt.date(from: s) ?? fallback.date(from: s)
+        }
+        let upperState: String
+        if p.merged { upperState = "MERGED" }
+        else if p.state == "closed" { upperState = "CLOSED" }
+        else { upperState = "OPEN" }
+        let key = prKey(repo: p.repo, pr: p.number)
+        prStateByKey[key] = PRState(
+            state: upperState,
+            isMerged: p.merged,
+            mergedAt: parse(p.mergedAt),
+            closedAt: parse(p.closedAt)
+        )
+    }
+
+    /// Rewrite the run matching `runId` in both caches (repo-wide +
+    /// branch-scoped) using the caller's transformer.
+    private func patchCachedRun(
+        runId: Int64,
+        repo: String,
+        branch: String,
+        transform: (GitHubRun) -> GitHubRun
+    ) {
+        if var runs = githubRunsByRepo[repo],
+           let idx = runs.firstIndex(where: { $0.id == runId }) {
+            runs[idx] = transform(runs[idx])
+            githubRunsByRepo[repo] = runs
+        }
+        let key = "\(repo)\t\(branch)"
+        if var runs = githubRunsByBranch[key],
+           let idx = runs.firstIndex(where: { $0.id == runId }) {
+            runs[idx] = transform(runs[idx])
+            githubRunsByBranch[key] = runs
         }
     }
 
@@ -667,6 +767,7 @@ final class AppStore: ObservableObject {
         if knownRepos != previousRepos {
             Task { [weak self] in await self?.reconcileLiveMode() }
         }
+        reseedAutoExpand()
         detectBadgeTransition()
     }
 
@@ -742,6 +843,7 @@ final class AppStore: ObservableObject {
                     for run in runs {
                         self.fetchJobsIfNeeded(for: run)
                     }
+                    self.reseedAutoExpand()
                 }
             }
         }
@@ -863,6 +965,7 @@ final class AppStore: ObservableObject {
                 for run in runs {
                     self.fetchJobsIfNeeded(for: run)
                 }
+                self.reseedAutoExpand()
             }
         }
     }
@@ -892,6 +995,10 @@ final class AppStore: ObservableObject {
                 await MainActor.run {
                     self.prStateByKey[key] = state
                     self.inflightPRStateFetches.remove(key)
+                    // PR state arriving can flip isActivelyWorkedOn —
+                    // re-seed so open PRs get auto-expanded once we
+                    // actually know they're open.
+                    self.reseedAutoExpand()
                 }
             } else {
                 await MainActor.run {
