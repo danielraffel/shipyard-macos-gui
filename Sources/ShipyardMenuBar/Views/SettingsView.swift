@@ -129,7 +129,7 @@ struct SettingsView: View {
     private var developerSection: some View {
         Section("Developer") {
             Toggle("Show demo data", isOn: $store.showDemoData)
-            Text("Replaces live ship-state polling with fixture ships. Useful for previewing the UI without active PRs.")
+            Text("Replaces live polling with fixture PRs. Useful for previewing the UI when nothing is in flight.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }

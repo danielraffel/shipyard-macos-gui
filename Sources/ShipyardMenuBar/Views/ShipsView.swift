@@ -32,8 +32,8 @@ struct ShipsView: View {
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
             Text(store.showGitHubActions
-                 ? "Ship cards: local dispatches. Below: recent GitHub Actions for the same repos."
-                 : "Showing local ship-state only. Enable GitHub Actions in Settings to see more.")
+                 ? "Above: PRs you've shipped from this machine. Below: recent GitHub Actions on the same repos."
+                 : "Showing only PRs you've shipped from this machine. Enable GitHub Actions in Settings to see more.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
         }
@@ -90,10 +90,10 @@ struct ShipsView: View {
 
     private var headerBar: some View {
         HStack(spacing: 6) {
-            Image(systemName: "shippingbox")
+            Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
-            Text("Local ship-states")
+            Text("Active PRs")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
@@ -191,7 +191,7 @@ struct ShipsView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .padding(.top, 6)
-            .help("Show every ship-state entry the CLI is tracking")
+            .help("Show every PR the CLI is tracking")
         }
     }
 

@@ -1,167 +1,103 @@
 # Shipyard macOS
 
-A native macOS menu-bar companion for [Shipyard](https://github.com/danielraffel/Shipyard)
-— the cross-platform CI controller for AI agents.
+A native macOS menu-bar companion for [Shipyard](https://github.com/danielraffel/Shipyard) — the cross-platform CI controller.
 
-The agent runs `shipyard ship`, the app reads `shipyard watch --json --follow`
-and keeps a glanceable summary of every in-flight ship in your menu bar.
+## What it does
 
-**Native Swift/SwiftUI — `MenuBarExtra`, no Catalyst, no Electron, no web tech.**
+Shipyard itself runs in the terminal, and that's still the preferred way to
+drive it. This app is a **quick glance** at what's happening without dropping
+into a shell:
+
+- See every in-flight PR's CI status in one popover — green / running / failed
+  per platform.
+- Click a job to **retarget** it to a different runner (GitHub-hosted →
+  Namespace, or vice-versa) without editing workflow YAML.
+- **Add a lane** (macOS / Linux / Windows / iOS / Android) to an in-flight PR
+  without re-dispatching the whole matrix.
+- Click straight through to the GitHub run, the PR, or logs.
+- `shipyard doctor` output in a dedicated pane.
+- Notifications on merge / fail / all-green.
+
+It was my first test of [Claude Design](https://claude.ai/chat/design) — built
+on an airplane — so treat the polish accordingly.
+
+## Screenshots
+
+| Active PR | Retarget | Confirm before interrupting |
+|---|---|---|
+| ![Active PR](docs/screenshots/active-runner.png) | ![Retarget](docs/screenshots/retarget.png) | ![Confirm](docs/screenshots/confirm-interrupt.png) |
+
+| Add a lane | Other checks |
+|---|---|
+| ![Add lane](docs/screenshots/add-lane.png) | ![Other checks](docs/screenshots/other-checks.png) |
 
 ## Download
 
 **[Latest signed & notarized DMG](https://github.com/danielraffel/shipyard-macos-gui/releases/latest/download/Shipyard.dmg)**
 
-Requires macOS 13 Ventura or later. Drag the app from the DMG into
-`/Applications` and launch.
+Requires macOS 13 Ventura or later. Drag from the DMG into `/Applications` and launch. The app lives in the menu bar — no dock icon.
 
-## Status
+Requires the `shipyard` CLI on your `PATH` (auto-discovered at `/usr/local/bin`, `/opt/homebrew/bin`, or `~/.pulp/bin`).
 
-Early skeleton. The plumbing (menu-bar icon, popover tabs, NDJSON subprocess,
-settings, doctor pane) is wired up; the detailed interactive flows from the
-[design prototype](../shipyard/macos-feature-ideas) are stubbed and ready to
-extend.
-
-## Requirements
-
-- macOS 13 Ventura or later (`MenuBarExtra` availability)
-- Xcode 16+ (built on Xcode 26.3)
-- [`xcodegen`](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`
-- The `shipyard` CLI installed somewhere on your PATH
-  (`/usr/local/bin/shipyard` or `/opt/homebrew/bin/shipyard` auto-discovered)
-
-## Build & run
+## Build locally
 
 ```bash
 git clone git@github.com:danielraffel/shipyard-macos-gui.git
 cd shipyard-macos-gui
-./scripts/bootstrap.sh      # generates ShipyardMenuBar.xcodeproj via xcodegen
-open ShipyardMenuBar.xcodeproj
-#  …or:
-./scripts/build.sh Release   # xcodebuild archive → build/ShipyardMenuBar-Release.xcarchive
+brew install xcodegen
+./scripts/bootstrap.sh          # generates ShipyardMenuBar.xcodeproj
+open ShipyardMenuBar.xcodeproj  # or: ./scripts/build.sh Release
 ```
 
-Signing uses your Developer ID from the project settings. For unsigned local
-debug runs, change `CODE_SIGN_STYLE` in `project.yml` to `Automatic` with no
-team set, regenerate with `xcodegen generate`, and use a Debug build.
-
-## Notarization
-
-```bash
-# One-time — store creds outside the repo:
-cat > ~/.config/shipyard-macos-gui.env <<'EOF'
-APPLE_ID=you@example.com
-TEAM_ID=XXXXXXXXXX
-APP_SPECIFIC_PASSWORD=abcd-efgh-ijkl-mnop
-EOF
-chmod 600 ~/.config/shipyard-macos-gui.env
-
-./scripts/build.sh Release
-./scripts/notarize.sh build/ShipyardMenuBar-Release.xcarchive/Products/Applications/Shipyard.app
-```
+For unsigned local debug, set `CODE_SIGN_STYLE: Automatic` with no team in `project.yml`, regenerate with `xcodegen generate`, and use a Debug build.
 
 ## Release
 
-The release flow is **tag-triggered and local** — no GitHub Actions,
-no publishing on every commit. The stable download URL
-(`releases/latest/download/Shipyard.dmg`) always resolves to the
-newest release's asset.
+Tag-triggered, local-only — no GitHub Actions. The stable download URL (`releases/latest/download/Shipyard.dmg`) always points at the newest release.
+
+If you're working with Claude Code, say **"push a build"** and it'll handle the full flow (see `CLAUDE.md`). Manually:
 
 ```bash
-# 1. Bump MARKETING_VERSION in project.yml (source of truth)
-# 2. Commit the bump; push.
-# 3. Tag and release:
+# 1. Bump MARKETING_VERSION in project.yml, commit.
 git tag v1.0.0
 git push --tags
-./scripts/release.sh             # reads tag from HEAD
+./scripts/release.sh            # reads tag from HEAD
 ```
 
-What `release.sh` does:
+`release.sh` validates the tag against `project.yml`, archives, signs, notarizes the `.app` and the DMG, staples both, and publishes via `gh release`. Idempotent on re-runs (`--clobber`).
 
-1. Validates the git tag matches `project.yml`'s `MARKETING_VERSION`
-   and fails loudly on drift.
-2. `./scripts/build.sh Release` — produces `build/ShipyardMenuBar-Release.xcarchive`.
-3. `xcodebuild -exportArchive` with a Developer ID distribution
-   `exportOptions.plist` — produces a signed, hardened, timestamped `.app`.
-4. `./scripts/notarize.sh` — submits to Apple notary, waits, staples.
-5. Verifies the `.app` is properly stapled.
-6. `hdiutil create` → `dist/Shipyard.dmg` (stable filename, no version).
-7. Staples and validates the DMG.
-8. `gh release create / upload --clobber` — idempotent on re-runs.
+Credentials live in `~/.config/shipyard-macos-gui.env` (gitignored):
 
-Credentials (`APPLE_ID`, `TEAM_ID`, `APP_SPECIFIC_PASSWORD`) live in
-`~/.config/shipyard-macos-gui.env` (gitignored). Add `--draft` to
-`release.sh` for a dry-run that publishes as a draft:
-
-```bash
-./scripts/release.sh v0.0.0-dryrun --draft
+```
+APPLE_ID=you@example.com
+TEAM_ID=XXXXXXXXXX
+APP_SPECIFIC_PASSWORD=abcd-efgh-ijkl-mnop
 ```
 
-## License
-
-[MIT](LICENSE). © 2026 Generous Corp.
-
-## Why native (not Catalyst)
-
-- `MenuBarExtra` is pure SwiftUI on macOS 13+, backed by `NSStatusItem`.
-- No `UIApplication`, no `targetEnvironment(macCatalyst)` — real AppKit host.
-- Proper `LSUIElement = true` so no dock icon.
-- Code signing via `Developer ID Application` + hardened runtime + timestamp.
-- Sandbox disabled (the app spawns the `shipyard` CLI subprocess; sandbox would
-  block that without a complex entitlement for each path).
-
-Reference for what NOT to do: see [HomeKitMenu](https://github.com/danielraffel/HomeKitMenu)'s
-use of `UIApplication.didBecomeActiveNotification` and
-`#if targetEnvironment(macCatalyst)` — that's the Catalyst path this project
-explicitly avoids.
+Add `--draft` for a dry-run that publishes as a draft.
 
 ## Project layout
 
 ```
 shipyard-macos-gui/
-├── project.yml                          # xcodegen spec (source of truth)
-├── ShipyardMenuBar.xcodeproj/           # generated — do not edit by hand
+├── project.yml                     # xcodegen spec (source of truth)
+├── CLAUDE.md                       # agent shortcuts: "push a build" etc.
 ├── Sources/ShipyardMenuBar/
-│   ├── ShipyardMenuBarApp.swift         # @main, MenuBarExtra scene
-│   ├── Models/
-│   │   └── Models.swift                 # Ship, Target, Runner, status enums
+│   ├── ShipyardMenuBarApp.swift    # @main
+│   ├── Models/Models.swift         # Ship, Target, Runner, status enums
 │   ├── Services/
-│   │   ├── AppStore.swift               # @Observable app state
-│   │   └── ShipyardCLIRunner.swift      # NDJSON subprocess actor
-│   └── Views/
-│       ├── MenuBarLabelView.swift       # icon + badge
-│       ├── PopoverView.swift            # tab host
-│       ├── ShipsView.swift              # list of ships
-│       ├── ShipCardView.swift           # one ship card
-│       ├── TargetRowView.swift          # one target row
-│       ├── DoctorView.swift             # shipyard doctor --json wrapper
-│       └── SettingsView.swift           # prefs
-├── Resources/
-│   ├── Info.plist                       # generated by xcodegen
-│   └── ShipyardMenuBar.entitlements
+│   │   ├── AppStore.swift          # central @MainActor state
+│   │   ├── StatusItemController.swift  # NSStatusItem + NSPopover
+│   │   └── ShipyardCLIRunner.swift # NDJSON subprocess actor
+│   └── Views/                      # SwiftUI views
 ├── scripts/
-│   ├── bootstrap.sh                     # xcodegen generate + signing check
-│   ├── build.sh                         # xcodebuild archive
-│   └── notarize.sh                      # notarytool submit + staple
-└── docs/
-    └── ARCHITECTURE.md                  # design notes
+│   ├── bootstrap.sh                # xcodegen generate + signing check
+│   ├── build.sh                    # xcodebuild archive
+│   ├── notarize.sh                 # notarytool submit + staple
+│   └── release.sh                  # full tag → DMG → release pipeline
+└── docs/ARCHITECTURE.md
 ```
-
-## Roadmap to shipped app (rough)
-
-- [x] MenuBarExtra scaffolding, popover tabs, settings
-- [x] CLI binary discovery + subprocess wrapper
-- [x] `shipyard doctor --json` integration in Doctor pane
-- [ ] NDJSON `shipyard watch --json --follow` integration — parse → Ship state
-- [ ] Multi-worktree ship discovery via `shipyard ship-state list --json`
-- [ ] Interactive runner picker + inline log pane per target row
-- [ ] `cloud retarget` / `cloud add-lane` wired to one-click actions
-- [ ] `auto-merge` toggle per PR
-- [ ] Failure classification colors (INFRA/TIMEOUT/TEST) from #83
-- [ ] Heartbeat stale marker from #84
-- [ ] Advisory lane dim + tag from #87
-- [ ] Resume prompt on wake (optional, default off)
 
 ## License
 
-TBD.
+[MIT](LICENSE).

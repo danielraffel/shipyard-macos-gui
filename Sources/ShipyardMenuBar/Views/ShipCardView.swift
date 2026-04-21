@@ -175,40 +175,59 @@ struct ShipCardView: View {
         return r
     }
 
-    /// Synthesize platform-level Target rows. If shipyard dispatched
-    /// native targets, use those (richest data, supports retarget on
-    /// the runner pill). Otherwise derive one Target per platform
-    /// from nested GitHub Actions matrix jobs — so the user sees
-    /// their macOS / Linux / Windows runners at the top even when
-    /// shipyard hands off to GH Actions.
+    /// Platform-level Target rows, unioned across BOTH data sources:
+    ///
+    ///  - Shipyard-dispatched targets (from `ship.targets`) — these
+    ///    are the richest rows; they carry retarget hooks, heartbeat,
+    ///    phase, and provider info.
+    ///  - GitHub Actions matrix jobs grouped by OS family — these
+    ///    fill in platforms shipyard didn't dispatch (e.g. shipyard
+    ///    only dispatched macOS locally; Linux + Windows ran on GH
+    ///    directly via the PR workflow).
+    ///
+    /// Before this union, the card hid non-shipyard platforms when
+    /// even one shipyard target was present — so a PR with a local
+    /// macOS dispatch that failed would show only `mac` and drop the
+    /// green Linux / Windows GH runs from view.
     private func effectivePlatformTargets() -> [Target] {
-        if !ship.targets.isEmpty { return ship.targets }
         struct LaneData {
             var statuses: [TargetStatus] = []
             var provider: String? = nil
             var githubRunId: Int64? = nil
         }
-        var byPlatform: [String: LaneData] = [:]
+        var shipyardByKey: [String: Target] = [:]
+        var unkeyedShipyard: [Target] = []
+        for t in ship.targets {
+            if let key = Self.platformKey(t.name) {
+                shipyardByKey[key] = t
+            } else {
+                unkeyedShipyard.append(t)
+            }
+        }
+        var ghByKey: [String: LaneData] = [:]
         for run in store.githubRuns(for: ship) {
             for job in store.jobsByRunId[run.id] ?? [] {
                 guard let key = Self.platformKey(job.name) else { continue }
-                var d = byPlatform[key] ?? LaneData()
+                var d = ghByKey[key] ?? LaneData()
                 d.statuses.append(Self.mapJobStatus(job))
                 if job.provider != "unknown" { d.provider = job.provider }
-                // Keep the most recent job's ID — that's what a user
-                // is most likely to want logs or retarget for.
                 if d.githubRunId == nil { d.githubRunId = run.id }
-                byPlatform[key] = d
+                ghByKey[key] = d
             }
         }
         let order = ["macos", "linux", "windows", "ios", "android", "tvos", "watchos"]
-        return order.compactMap { key -> Target? in
-            guard let d = byPlatform[key] else { return nil }
+        var result: [Target] = []
+        for key in order {
+            if let sy = shipyardByKey[key] {
+                // Shipyard dispatch wins — it owns retarget + richer
+                // metadata. GH data for the same platform is left
+                // out to avoid double-counting the same matrix jobs.
+                result.append(sy)
+                continue
+            }
+            guard let d = ghByKey[key] else { continue }
             var t = Target(name: Self.canonicalPlatformName(key))
             t.status = Self.aggregateStatus(d.statuses)
-            // Always set a runner so TargetRowView renders the pill
-            // (which is the retarget tap target). Unknown provider
-            // still gets a placeholder pill so retarget is reachable.
             let prov = d.provider ?? "unknown"
             let provEnum = RunnerProvider(rawValue: prov == "github-hosted" ? "github" : prov)
                 ?? .github
@@ -219,12 +238,13 @@ struct ShipCardView: View {
             )
             t.githubRunId = d.githubRunId
             t.githubRepo = ship.repo
-            // Phase/elapsed aren't meaningful for a GH-derived
-            // aggregate lane — leaving them unset so the row doesn't
-            // render "configure 0s". TargetRowView's metadata block
-            // checks heartbeatAgeSeconds > 0 etc. and omits when bare.
-            return t
+            result.append(t)
         }
+        // Tack on any shipyard targets whose names don't match a
+        // canonical OS family — custom / internal lanes the user
+        // still cares about.
+        result.append(contentsOf: unkeyedShipyard)
+        return result
     }
 
     private static func canonicalPlatformName(_ key: String) -> String {
@@ -242,11 +262,11 @@ struct ShipCardView: View {
 
     private func confirmAndArchive() {
         let alert = NSAlert()
-        alert.messageText = "Archive ship-state for PR #\(ship.prNumber)?"
+        alert.messageText = "Archive tracking for PR #\(ship.prNumber)?"
         let warning = isActivelyRunning
-            ? "\n\n⚠︎ This ship is actively running. Archiving will stop Shipyard from tracking it — any in-flight CI continues on GitHub but won't be visible here."
+            ? "\n\n⚠︎ This PR is actively running. Archiving will stop Shipyard from tracking it — any in-flight CI continues on GitHub but won't be visible here."
             : ""
-        alert.informativeText = "Runs:\n  shipyard ship-state discard \(ship.prNumber)\n\nThe CLI keeps a tombstone; the ship-state file is not deleted. You can re-list it from the terminal.\(warning)"
+        alert.informativeText = "Runs:\n  shipyard ship-state discard \(ship.prNumber)\n\nThe CLI keeps a tombstone; the underlying file is not deleted. You can re-list it from the terminal.\(warning)"
         alert.alertStyle = isActivelyRunning ? .critical : .warning
         alert.addButton(withTitle: "Archive")
         alert.addButton(withTitle: "Cancel")

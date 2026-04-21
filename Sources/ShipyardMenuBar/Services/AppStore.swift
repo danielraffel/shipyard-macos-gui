@@ -411,6 +411,13 @@ final class AppStore: ObservableObject {
 
         for ship in updated {
             fetchPRStateIfNeeded(for: ship)
+            // Refresh branch-scoped runs so the collapsed per-platform
+            // dot rollup reflects the latest job state without needing
+            // the user to expand the card. Inflight-dedup in the
+            // fetcher makes this cheap to call on every snapshot.
+            if !ship.dismissed {
+                fetchRunsForShipOnDemand(ship)
+            }
         }
 
         // Auto-clear stale terminal ships. `shipyard ship-state list`
@@ -502,16 +509,28 @@ final class AppStore: ObservableObject {
         for repo in repos {
             if let runs = await GitHubActionsPoller.fetch(repo: repo, limit: 100) {
                 await MainActor.run {
+                    let previous = self.githubRunsByRepo[repo] ?? []
                     self.githubRunsByRepo[repo] = runs
-                    // Kick off a jobs fetch for every new run we
-                    // learned about. Matrix jobs are what populate
-                    // the platform lanes — without this, lanes only
-                    // appear after the user interacts with the card
-                    // a second time.
+                    self.reconcileJobsCache(newRuns: runs, oldRuns: previous)
                     for run in runs {
                         self.fetchJobsIfNeeded(for: run)
                     }
                 }
+            }
+        }
+    }
+
+    /// Drops cached job data for any run whose status or conclusion
+    /// changed between polls. Without this, a run that transitioned
+    /// from in_progress (red/yellow jobs) to completed (green jobs)
+    /// would keep serving the old job rollup until the user manually
+    /// re-triggered a fetch by expanding the card.
+    private func reconcileJobsCache(newRuns: [GitHubRun], oldRuns: [GitHubRun]) {
+        let oldByID = Dictionary(uniqueKeysWithValues: oldRuns.map { ($0.id, $0) })
+        for run in newRuns {
+            guard let prev = oldByID[run.id] else { continue }
+            if prev.status != run.status || prev.conclusion != run.conclusion {
+                jobsByRunId.removeValue(forKey: run.id)
             }
         }
     }
@@ -570,28 +589,39 @@ final class AppStore: ObservableObject {
         return result.sorted { $0.createdAt > $1.createdAt }
     }
 
-    /// Triggered by ShipCardView when the card becomes expanded.
-    /// Fetches `gh run list --branch <ship.branch>` to backfill runs
-    /// that may be outside the repo-wide top-100 window.
+    /// Inflight guard for branch-scoped run fetches. Applies to both
+    /// user-triggered expands and the periodic refresh from
+    /// applySnapshot — prevents duplicate `gh run list` calls piling
+    /// up when a ship's snapshot lands faster than the network.
+    private var inflightBranchFetches: Set<String> = []
+
+    /// Fires `gh run list --branch <ship.branch>` to backfill runs
+    /// that may be outside the repo-wide top-100 window, and to pick
+    /// up status transitions that the repo-wide poll missed (e.g. a
+    /// branch's runs getting pushed off the top-100 list after the
+    /// PR merged). Called on card-expand AND on every snapshot so
+    /// collapsed dots don't freeze at a stale rollup.
     func fetchRunsForShipOnDemand(_ ship: Ship) {
         guard showGitHubActions,
               !ship.repo.isEmpty,
               !ship.branch.isEmpty else { return }
         let repo = ship.repo
         let branch = ship.branch
+        let key = "\(repo)\t\(branch)"
+        if inflightBranchFetches.contains(key) { return }
+        inflightBranchFetches.insert(key)
         Task {
-            if let runs = await GitHubActionsPoller.fetch(
+            let runs = await GitHubActionsPoller.fetch(
                 repo: repo, branch: branch, limit: 50
-            ) {
-                await MainActor.run {
-                    self.githubRunsByBranch["\(repo)\t\(branch)"] = runs
-                    // Branch-scoped runs land async — chain job
-                    // fetches immediately so platform lanes can
-                    // populate on the same render cycle instead of
-                    // requiring the user to trigger another.
-                    for run in runs {
-                        self.fetchJobsIfNeeded(for: run)
-                    }
+            )
+            await MainActor.run {
+                defer { self.inflightBranchFetches.remove(key) }
+                guard let runs else { return }
+                let previous = self.githubRunsByBranch[key] ?? []
+                self.githubRunsByBranch[key] = runs
+                self.reconcileJobsCache(newRuns: runs, oldRuns: previous)
+                for run in runs {
+                    self.fetchJobsIfNeeded(for: run)
                 }
             }
         }

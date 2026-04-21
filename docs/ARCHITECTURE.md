@@ -10,9 +10,10 @@ Ventura (where `MenuBarExtra` shipped).
 just hides the boilerplate. Behavior:
 
 - No main window, no dock icon (`LSUIElement = true`).
-- The menu bar icon hosts a label view (our `MenuBarLabelView`).
-- `menuBarExtraStyle(.window)` gives us a popover that can host any SwiftUI
-  view tree — not the restrictive NSMenu subset.
+- The menu bar icon + popover are hand-rolled via `StatusItemController`
+  (raw `NSStatusItem` + `NSPopover`). `MenuBarExtra`'s template-image
+  path was unreliable on recent macOS builds (icon rendered as a solid
+  black circle), so we manage the status item ourselves.
 
 We explicitly do **not** use:
 

@@ -67,7 +67,7 @@ struct GitHubActionsSection: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Runs without a matching local ship-state — main/tag workflows, scheduled jobs, manual dispatches, and PRs you haven't shipped from this machine.")
+        .help("Runs that don't match a PR you've shipped from this machine — main/tag workflows, scheduled jobs, manual dispatches, and other contributors' PRs.")
     }
 
     @ViewBuilder
