@@ -91,14 +91,25 @@ struct PopoverView: View {
         }
     }
 
+    /// Header status reflects **connection/service state**, not the roll-up
+    /// of every tracked PR's CI outcome. Per-PR outcomes are already visible
+    /// on each card and summarized in the "X green · Y failed" counter row.
+    /// Rolling CI failures into the header read as service-level failure
+    /// ("Shipyard · failed") which was misleading.
     @ViewBuilder
     private var statusDot: some View {
         let (color, label): (Color, String) = {
-            switch store.overallBadge {
-            case .failed: return (ShipyardColors.red, "failed")
-            case .allGreen: return (ShipyardColors.green, "all green")
-            case .running: return (ShipyardColors.blue, "running")
-            case .idle: return (.secondary, "idle")
+            if store.cliBinaryResolved == nil {
+                return (ShipyardColors.red, "CLI not found")
+            }
+            switch store.liveStatus {
+            case .live:
+                return (ShipyardColors.green, "live")
+            case .polling(let reason):
+                if reason == .userDisabled {
+                    return (.secondary, "polling (manual)")
+                }
+                return (.secondary, "polling")
             }
         }()
         HStack(spacing: 4) {

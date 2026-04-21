@@ -67,7 +67,7 @@ struct GitHubActionsSection: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Runs that don't match a PR you've shipped from this machine — main/tag workflows, scheduled jobs, manual dispatches, and other contributors' PRs.")
+        .help("Runs that don't match a PR opened from this machine — main/tag workflows, scheduled jobs, manual dispatches, and other contributors' PRs.")
     }
 
     @ViewBuilder

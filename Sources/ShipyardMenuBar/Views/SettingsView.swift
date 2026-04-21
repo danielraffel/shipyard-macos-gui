@@ -126,7 +126,7 @@ struct SettingsView: View {
     private var githubSection: some View {
         Section("GitHub Actions") {
             Toggle("Show runs from github.com", isOn: $store.showGitHubActions)
-                .help("Polls `gh run list` every 60s for each repo you've shipped from this machine")
+                .help("Polls `gh run list` every 60s for each repo this machine has opened a PR from")
             Picker("Time window", selection: $store.ghWindowMinutes) {
                 Text("1 hour").tag(60)
                 Text("4 hours").tag(240)
@@ -138,7 +138,7 @@ struct SettingsView: View {
                       prompt: Text("e.g. post-tag-sync, changelog"))
                 .help("Comma-separated substrings. A run is hidden when its workflow name contains any of these.")
                 .disabled(!store.showGitHubActions)
-            Text("Runs already represented by a local ship card are auto-deduplicated by head_sha.")
+            Text("Runs already represented by a local PR card are auto-deduplicated by head_sha.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }
@@ -242,7 +242,7 @@ struct SettingsView: View {
     private var developerSection: some View {
         Section("Developer") {
             Toggle("Show demo data", isOn: $store.showDemoData)
-            Text("Replaces live polling with fixture PRs. Useful for previewing the UI when nothing is in flight.")
+            Text("Replaces live polling with fixture PRs. Useful for previewing the UI when no PRs are active.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }

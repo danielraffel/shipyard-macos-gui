@@ -114,13 +114,13 @@ struct ShipsView: View {
     /// is filtered to empty.
     private var scopeFooterText: String {
         guard store.showGitHubActions else {
-            return "Tracked PRs you've shipped with Shipyard. Enable GitHub Actions in Settings to see more."
+            return "Tracked PRs from this machine. Enable GitHub Actions in Settings to see more."
         }
         let hasUnrelated = !store.unrelatedGitHubRuns().isEmpty
         if hasUnrelated {
-            return "Tracked PRs you've shipped with Shipyard and recent GitHub Actions."
+            return "Tracked PRs from this machine and recent GitHub Actions."
         }
-        return "Tracked PRs you've shipped with Shipyard."
+        return "Tracked PRs from this machine."
     }
 
     private var groupedView: some View {
@@ -261,7 +261,7 @@ struct ShipsView: View {
 
     private var hiddenStaleBlock: some View {
         VStack(spacing: 4) {
-            Text("Nothing in flight")
+            Text("No active PRs")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary)
             Text("\(store.hiddenStaleCount) completed state\(store.hiddenStaleCount == 1 ? "" : "s") hidden by auto-clear.")
@@ -269,7 +269,7 @@ struct ShipsView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
-            Text("The CLI retains finished ships past the auto-clear interval. None are actively running.")
+            Text("The CLI retains completed PRs past the auto-clear interval. None are actively running.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -311,10 +311,10 @@ struct ShipsView: View {
 
     private var nothingInFlightBlock: some View {
         VStack(spacing: 4) {
-            Text("Nothing in flight")
+            Text("No active PRs")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary)
-            Text("Run \u{201C}shipyard ship\u{201D} in a worktree to see progress here.")
+            Text("Run \u{201C}shipyard pr\u{201D} in a worktree to see progress here.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

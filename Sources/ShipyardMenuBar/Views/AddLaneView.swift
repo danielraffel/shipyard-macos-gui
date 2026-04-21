@@ -117,7 +117,7 @@ struct AddLaneView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Add \(name) to this ship")
+        .help("Add \(name) to this PR")
     }
 
     private var customTargetField: some View {
