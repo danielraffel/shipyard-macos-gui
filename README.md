@@ -8,6 +8,13 @@ and keeps a glanceable summary of every in-flight ship in your menu bar.
 
 **Native Swift/SwiftUI — `MenuBarExtra`, no Catalyst, no Electron, no web tech.**
 
+## Download
+
+**[Latest signed & notarized DMG](https://github.com/danielraffel/shipyard-macos-gui/releases/latest/download/Shipyard.dmg)**
+
+Requires macOS 13 Ventura or later. Drag the app from the DMG into
+`/Applications` and launch.
+
 ## Status
 
 Early skeleton. The plumbing (menu-bar icon, popover tabs, NDJSON subprocess,
@@ -53,20 +60,42 @@ chmod 600 ~/.config/shipyard-macos-gui.env
 ./scripts/notarize.sh build/ShipyardMenuBar-Release.xcarchive/Products/Applications/Shipyard.app
 ```
 
-## Distribution: DMG
+## Release
 
-`scripts/package-dmg.sh` does the full pipeline end-to-end — archives
-Release, notarizes the .app, staples, builds a signed/notarized DMG
-with a drag-to-Applications layout, and stamps it with the version
-string from `project.yml`.
+The release flow is **tag-triggered and local** — no GitHub Actions,
+no publishing on every commit. The stable download URL
+(`releases/latest/download/Shipyard.dmg`) always resolves to the
+newest release's asset.
 
 ```bash
-./scripts/package-dmg.sh            # reads version from project.yml
-./scripts/package-dmg.sh 0.2.0      # override version
+# 1. Bump MARKETING_VERSION in project.yml (source of truth)
+# 2. Commit the bump; push.
+# 3. Tag and release:
+git tag v1.0.0
+git push --tags
+./scripts/release.sh             # reads tag from HEAD
 ```
 
-Output: `build/Shipyard-<version>.dmg` — ready to upload to a GitHub
-release.
+What `release.sh` does:
+
+1. Validates the git tag matches `project.yml`'s `MARKETING_VERSION`
+   and fails loudly on drift.
+2. `./scripts/build.sh Release` — produces `build/ShipyardMenuBar-Release.xcarchive`.
+3. `xcodebuild -exportArchive` with a Developer ID distribution
+   `exportOptions.plist` — produces a signed, hardened, timestamped `.app`.
+4. `./scripts/notarize.sh` — submits to Apple notary, waits, staples.
+5. Verifies the `.app` is properly stapled.
+6. `hdiutil create` → `dist/Shipyard.dmg` (stable filename, no version).
+7. Staples and validates the DMG.
+8. `gh release create / upload --clobber` — idempotent on re-runs.
+
+Credentials (`APPLE_ID`, `TEAM_ID`, `APP_SPECIFIC_PASSWORD`) live in
+`~/.config/shipyard-macos-gui.env` (gitignored). Add `--draft` to
+`release.sh` for a dry-run that publishes as a draft:
+
+```bash
+./scripts/release.sh v0.0.0-dryrun --draft
+```
 
 ## License
 

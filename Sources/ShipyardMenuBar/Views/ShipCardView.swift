@@ -170,23 +170,27 @@ struct ShipCardView: View {
                 withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
             }
 
-            // Count-badge for nested GitHub Actions runs. Visible in
-            // collapsed state so users know there IS something in this
-            // card before they expand it.
+            // Per-lane status dots — one dot per shipyard target or,
+            // when those aren't populated, per nested GitHub Actions
+            // workflow run. Matches the design prototype's at-a-
+            // glance summary. Collapsed state only (expanded card has
+            // the full rows).
             if !expanded {
-                let ghCount = store.githubRuns(for: ship).count
-                if ghCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "bolt.circle.fill")
-                            .foregroundStyle(ShipyardColors.blue)
-                        Text("\(ghCount)")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(ShipyardColors.blue)
+                let dots = summaryDots()
+                if !dots.isEmpty {
+                    HStack(spacing: 3) {
+                        ForEach(Array(dots.prefix(8).enumerated()), id: \.offset) { _, color in
+                            Circle()
+                                .fill(color)
+                                .frame(width: 6, height: 6)
+                        }
+                        if dots.count > 8 {
+                            Text("+\(dots.count - 8)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(ShipyardColors.blue.opacity(0.12), in: Capsule())
-                    .help("\(ghCount) GitHub Actions run\(ghCount == 1 ? "" : "s") on this PR — click the card header to expand.")
+                    .help("\(dots.count) lane\(dots.count == 1 ? "" : "s") — expand card for detail")
                 }
             }
 
@@ -272,7 +276,11 @@ struct ShipCardView: View {
         let icon: String?
 
         if let prState, prState.isMerged {
-            label = "merged"; color = ShipyardColors.purple
+            // Merged = success. Green matches how a merged PR reads
+            // on GitHub and keeps "green" and "merged" visually in
+            // the same family. The merge arrow icon still signals
+            // "this landed" vs a plain green check.
+            label = "merged"; color = ShipyardColors.green
             icon = "arrow.trianglehead.merge"
         } else if let prState, prState.isClosed {
             label = "closed"; color = .secondary; icon = "xmark.circle"
@@ -344,5 +352,33 @@ struct ShipCardView: View {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Compute a flat list of status colors, one per lane, for the
+    /// dot summary. Uses shipyard targets when present; falls back to
+    /// nested GitHub Actions workflow runs.
+    private func summaryDots() -> [Color] {
+        if !ship.targets.isEmpty {
+            return ship.targets.map(dotColorForTarget)
+        }
+        return store.githubRuns(for: ship).map(dotColorForRun)
+    }
+
+    private func dotColorForTarget(_ t: Target) -> Color {
+        switch t.status {
+        case .passed: return ShipyardColors.green
+        case .failed: return ShipyardColors.red
+        case .running: return ShipyardColors.blue
+        case .reused: return ShipyardColors.purple
+        case .skipped: return .secondary.opacity(0.4)
+        case .pending: return .secondary.opacity(0.4)
+        }
+    }
+
+    private func dotColorForRun(_ r: GitHubRun) -> Color {
+        if r.isRunning { return ShipyardColors.blue }
+        if r.isFailure { return ShipyardColors.red }
+        if r.conclusion == "success" { return ShipyardColors.green }
+        return .secondary.opacity(0.4)
     }
 }
