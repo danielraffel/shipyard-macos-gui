@@ -148,7 +148,18 @@ xcrun hdiutil create \
   -ov -format UDZO \
   "$DMG" >/dev/null
 
-# ── step 6: staple + verify DMG ─────────────────────────────────────
+# ── step 6: notarize the DMG, then staple + verify ──────────────────
+# Stapling needs a notarization ticket keyed by the DMG's own SHA —
+# the .app submission from step 3 doesn't produce one for the DMG.
+# Submit the DMG itself, wait for acceptance, then staple.
+echo "→ Notarizing DMG"
+xcrun notarytool submit "$DMG" \
+  --apple-id "$APPLE_ID" \
+  --team-id "$TEAM_ID" \
+  --password "$APP_SPECIFIC_PASSWORD" \
+  --wait \
+  || { echo "ERROR: notarytool rejected DMG" >&2; exit 1; }
+
 echo "→ Stapling DMG"
 xcrun stapler staple "$DMG" \
   || { echo "ERROR: stapler staple failed on DMG" >&2; exit 1; }
