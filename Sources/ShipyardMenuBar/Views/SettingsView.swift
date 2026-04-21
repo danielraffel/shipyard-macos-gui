@@ -57,9 +57,16 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Live · via Tailscale Funnel")
                         .font(.system(size: 11, weight: .medium))
-                    Text(liveStatusDetail(lastEventAt: lastEventAt))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                    // TimelineView forces a re-render on a schedule so
+                    // the "last event 33 sec ago" string actually ticks
+                    // instead of freezing at its original value. Renders
+                    // inside the closure so `RelativeDateTimeFormatter`
+                    // can recompute against `Date()` each tick.
+                    TimelineView(.periodic(from: .now, by: 10)) { _ in
+                        Text(liveStatusDetail(lastEventAt: lastEventAt))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
                     // URL on its own line so the hostname doesn't get
                     // middle-truncated away.
                     Text(url.host ?? url.absoluteString)
