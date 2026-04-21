@@ -2,16 +2,20 @@ import SwiftUI
 import AppKit
 
 /// One row for a GitHub Actions run. Used in two contexts:
-///   * Nested inside a ship card (compact: true) to show runs for
-///     that PR's head_sha / branch.
+///   * Nested inside a ship card (compact: true) — pass `ship` to
+///     enable per-job retarget.
 ///   * Standalone in the "Other GitHub Actions runs" section
-///     (compact: false).
-/// Hover reveals cancel (for in-progress) or rerun (for failures).
+///     (compact: false, ship = nil) — retarget unavailable since
+///     there's no PR context to pass to `shipyard cloud retarget`.
+/// Hover reveals cancel (for in-progress) or rerun (for failures);
+/// each matrix job also gets its own retarget action.
 struct GitHubRunRow: View {
     let run: GitHubRun
     var compact: Bool = false
+    var ship: Ship? = nil
     @EnvironmentObject var store: AppStore
     @State private var hovering: Bool = false
+    @State private var retargetingJobId: Int64?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -96,29 +100,17 @@ struct GitHubRunRow: View {
         }
     }
 
+    @ViewBuilder
     private func jobRow(_ job: GitHubJob) -> some View {
-        let (color, symbol) = jobIcon(job)
-        return HStack(spacing: 6) {
-            Image(systemName: symbol)
-                .foregroundStyle(color)
-                .font(.system(size: 9))
-            Text(job.name)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 4)
-            if job.provider != "unknown" {
-                Text(job.provider)
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(providerColor(job.provider))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(providerColor(job.provider).opacity(0.15), in: Capsule())
-            }
-        }
-        .padding(.vertical, 1)
-        .help("\(job.name) — \(job.runnerLabel)")
+        JobRow(
+            job: job,
+            ship: ship,
+            iconResolver: jobIcon,
+            providerColor: providerColor,
+            onRetarget: ship == nil ? nil : { retargetingJobId = job.databaseId },
+            isRetargeting: retargetingJobId == job.databaseId,
+            onDismissRetarget: { retargetingJobId = nil }
+        )
     }
 
     private func jobIcon(_ job: GitHubJob) -> (Color, String) {

@@ -93,7 +93,7 @@ struct ShipCardView: View {
             }
             .padding(.top, 6)
             ForEach(runs) { run in
-                GitHubRunRow(run: run, compact: true)
+                GitHubRunRow(run: run, compact: true, ship: ship)
             }
         }
     }

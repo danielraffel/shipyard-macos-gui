@@ -31,6 +31,7 @@ struct GitHubRun: Identifiable, Equatable {
 /// "linux-x64"] for a Namespace runner. We derive a human-readable
 /// provider from these labels.
 struct GitHubJob: Decodable, Equatable, Hashable {
+    let databaseId: Int64
     let name: String
     let status: String
     let conclusion: String?
