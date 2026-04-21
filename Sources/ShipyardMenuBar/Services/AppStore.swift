@@ -434,13 +434,14 @@ final class AppStore: ObservableObject {
 
         for ship in updated {
             fetchPRStateIfNeeded(for: ship)
-            // Refresh branch-scoped runs so the collapsed per-platform
-            // dot rollup reflects the latest job state without needing
-            // the user to expand the card. Inflight-dedup in the
-            // fetcher makes this cheap to call on every snapshot.
-            if !ship.dismissed {
-                fetchRunsForShipOnDemand(ship)
-            }
+            // Skip auto-refresh for ships that can't transition again
+            // (merged / closed / stable terminal status). The user can
+            // still force a fetch by expanding the card. Active ships
+            // go through the TTL inside fetchRunsForShipOnDemand, so a
+            // high-cadence NDJSON stream doesn't burn the REST budget.
+            if ship.dismissed { continue }
+            if let pr = prState(for: ship), pr.isClosed { continue }
+            fetchRunsForShipOnDemand(ship)
         }
 
         // Auto-clear stale terminal ships. `shipyard ship-state list`
@@ -618,13 +619,20 @@ final class AppStore: ObservableObject {
     /// up when a ship's snapshot lands faster than the network.
     private var inflightBranchFetches: Set<String> = []
 
+    /// Last wall-clock fetch time per branch. Paired with
+    /// `branchFetchTTL` to rate-limit automatic priming from
+    /// applySnapshot so a high-cadence NDJSON stream doesn't burn
+    /// the GitHub REST core budget (5,000/hr).
+    private var lastBranchFetch: [String: Date] = [:]
+    private let branchFetchTTL: TimeInterval = 60
+
     /// Fires `gh run list --branch <ship.branch>` to backfill runs
-    /// that may be outside the repo-wide top-100 window, and to pick
-    /// up status transitions that the repo-wide poll missed (e.g. a
-    /// branch's runs getting pushed off the top-100 list after the
-    /// PR merged). Called on card-expand AND on every snapshot so
-    /// collapsed dots don't freeze at a stale rollup.
-    func fetchRunsForShipOnDemand(_ ship: Ship) {
+    /// outside the repo-wide top-100 window and to pick up status
+    /// transitions the repo-wide poll missed. Background callers
+    /// (applySnapshot) must not pass `force`; user-initiated callers
+    /// (card expand) pass `force: true` so the user always gets a
+    /// fresh fetch when they explicitly ask for detail.
+    func fetchRunsForShipOnDemand(_ ship: Ship, force: Bool = false) {
         guard showGitHubActions,
               !ship.repo.isEmpty,
               !ship.branch.isEmpty else { return }
@@ -632,6 +640,11 @@ final class AppStore: ObservableObject {
         let branch = ship.branch
         let key = "\(repo)\t\(branch)"
         if inflightBranchFetches.contains(key) { return }
+        if !force,
+           let last = lastBranchFetch[key],
+           Date().timeIntervalSince(last) < branchFetchTTL {
+            return
+        }
         inflightBranchFetches.insert(key)
         Task {
             let runs = await GitHubActionsPoller.fetch(
@@ -639,6 +652,7 @@ final class AppStore: ObservableObject {
             )
             await MainActor.run {
                 defer { self.inflightBranchFetches.remove(key) }
+                self.lastBranchFetch[key] = Date()
                 guard let runs else { return }
                 let previous = self.githubRunsByBranch[key] ?? []
                 self.githubRunsByBranch[key] = runs

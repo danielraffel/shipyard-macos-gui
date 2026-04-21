@@ -357,7 +357,9 @@ struct ShipCardView: View {
                 if next {
                     // Re-fetch on expand — user is asking to see
                     // detail, make sure the nested section is current.
-                    store.fetchRunsForShipOnDemand(ship)
+                    // Force past the TTL since this is a user-initiated
+                    // refresh.
+                    store.fetchRunsForShipOnDemand(ship, force: true)
                 }
             }
 
