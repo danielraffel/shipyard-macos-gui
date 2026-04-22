@@ -639,6 +639,12 @@ final class AppStore: ObservableObject {
     /// launch. Not @Published — purely internal bookkeeping.
     private var launchAtLoginSuppressDidSet: Bool = false
 
+    /// Sparkle wrapper, injected by AppDelegate after the store is
+    /// constructed. Settings binds the "Check for Updates…" button
+    /// to this. Optional so unit tests don't have to stand up a full
+    /// Sparkle stack.
+    var autoUpdate: AutoUpdateController?
+
     /// OS-level truth for the login-item registration. The Settings
     /// view surfaces this alongside the toggle so the user can see if
     /// macOS has declined / requires approval / is enabled.

@@ -22,8 +22,13 @@ struct ShipyardMenuBarApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = AppStore()
     var statusItem: StatusItemController?
+    /// Strongly held so Sparkle's daily-check timer + download/
+    /// install flow stays alive for the app's lifetime. Losing the
+    /// reference would silently disable auto-updates.
+    let autoUpdate = AutoUpdateController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        store.autoUpdate = autoUpdate
         statusItem = StatusItemController(store: store)
     }
 
