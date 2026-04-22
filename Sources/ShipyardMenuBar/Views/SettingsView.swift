@@ -26,7 +26,6 @@ struct SettingsView: View {
             Text(launchAtLoginFootnote)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            Divider().padding(.vertical, 2)
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Updates")
