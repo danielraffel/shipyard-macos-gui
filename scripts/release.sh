@@ -316,8 +316,32 @@ if gh release download --repo "$REPO" --pattern appcast.xml \
 fi
 
 DMG_URL="https://github.com/$REPO/releases/download/$TAG/Shipyard.dmg"
-RELEASE_HTML_URL="https://github.com/$REPO/releases/download/$TAG/$RELEASE_HTML_ASSET_NAME"
+# Sparkle's update-dialog + Version-History button both eventually
+# open <sparkle:releaseNotesLink> in a browser (for the history
+# case) or fetch it internally (for inline rendering). GitHub's
+# release-asset URLs always serve with `Content-Disposition:
+# attachment` and `Content-Type: application/octet-stream`, so any
+# HTML we upload as an asset will download instead of render in
+# the browser. Point at the GitHub release TAG page instead —
+# that's a proper HTML page that renders the release body inline
+# and serves as text/html. Fixes user report on v0.1.9 where
+# clicking Version History downloaded an .html file.
+RELEASE_TAG_URL="https://github.com/$REPO/releases/tag/$TAG"
 PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
+
+# Inline HTML body for Sparkle's update-available dialog. Sparkle
+# renders the <description> CDATA directly in its WebView, so the
+# user sees styled notes without an external fetch. Strip the
+# full-page <html>/<head>/<body> wrapper — Sparkle's WebView
+# provides its own chrome.
+INLINE_HTML=""
+if [ -f "$RELEASE_HTML" ]; then
+  # Extract the body content (between <body…> and </body>). sed
+  # range addressing is good enough since our template has exactly
+  # one <body> tag.
+  INLINE_HTML=$(sed -n '/<body>/,/<\/body>/p' "$RELEASE_HTML" \
+    | sed '1d;$d')
+fi
 
 NEW_ITEM=$(cat <<XML
     <item>
@@ -326,7 +350,10 @@ NEW_ITEM=$(cat <<XML
       <sparkle:version>$BUILD_NUMBER</sparkle:version>
       <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <sparkle:releaseNotesLink>$RELEASE_HTML_URL</sparkle:releaseNotesLink>
+      <description><![CDATA[
+$INLINE_HTML
+      ]]></description>
+      <sparkle:releaseNotesLink>$RELEASE_TAG_URL</sparkle:releaseNotesLink>
       <enclosure url="$DMG_URL"
                  sparkle:edSignature="$ED_SIGNATURE"
                  length="$ED_LENGTH"
