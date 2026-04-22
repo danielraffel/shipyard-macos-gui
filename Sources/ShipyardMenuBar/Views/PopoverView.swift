@@ -31,7 +31,14 @@ struct PopoverView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(.regularMaterial)
+        // NOTE: No explicit background here. NSPopover supplies its
+        // own material behind the content, and critically draws its
+        // callout arrow with that SAME material. Adding .background
+        // here (previously `.regularMaterial`) painted SwiftUI's own
+        // material over the popover's — different enough in light
+        // mode that the arrow looked like a mismatched lighter patch
+        // at the top edge. Letting the native material show through
+        // keeps content + arrow visually identical.
         .overlay(alignment: .bottom) {
             ClipboardToastView()
                 .padding(.bottom, 14)
