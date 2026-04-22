@@ -340,7 +340,14 @@ XML
   echo '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
   echo '  <channel>'
   echo '    <title>Shipyard</title>'
-  echo '    <link>https://github.com/'"$REPO"'</link>'
+  # Sparkle's "Version History" button in the update dialog opens
+  # this URL. Pointing it at the GitHub /releases list (plural)
+  # gives the user a human-readable history page with every
+  # version's notes. Before: we linked the repo root, so clicking
+  # "Version History" effectively dropped them into README.md with
+  # no release context. Worse, some clients were downloading the
+  # channel XML itself when the URL didn't render as HTML.
+  echo '    <link>https://github.com/'"$REPO"'/releases</link>'
   echo '    <description>Menu-bar companion for the Shipyard CI CLI.</description>'
   echo '    <language>en</language>'
   echo "$NEW_ITEM"
