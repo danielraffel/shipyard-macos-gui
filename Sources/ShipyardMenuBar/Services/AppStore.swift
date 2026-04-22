@@ -4,6 +4,10 @@ import Combine
 @MainActor
 final class AppStore: ObservableObject {
     @Published var ships: [Ship] = []
+    /// False until the first pipeline snapshot arrives. Used by the
+    /// empty-state view to distinguish "we haven't loaded yet" (show
+    /// spinner) from "truly no active PRs" (show anchor + copy).
+    @Published var hasLoadedInitialShips: Bool = false
 
     @Published var cliBinaryPath: String = UserDefaults.standard.string(forKey: Keys.cliBinaryPath) ?? "" {
         didSet {
@@ -200,11 +204,14 @@ final class AppStore: ObservableObject {
     /// + every 60s while the app is open.
     @Published private(set) var tailscaleStatus: TailscaleStatus?
 
-    private let liveController = LiveModeController()
+    private let liveController = DaemonClient()
     private var tailscaleProbeTask: Task<Void, Never>?
 
-    /// Re-probe Tailscale and reconcile the live controller. Safe to
-    /// call from anywhere — handles its own @MainActor hop.
+    /// Re-probe Tailscale and reconcile the daemon client. The live-
+    /// mode pipeline (webhook server, tunnel, registrations) now runs
+    /// in the shipyard CLI as `shipyard daemon`; this method is the
+    /// GUI-side driver that decides whether to spawn + subscribe.
+    /// Safe to call from anywhere — handles its own @MainActor hop.
     func reconcileLiveMode() async {
         let probe = await TailscaleProbe.probe()
         await MainActor.run {
@@ -213,11 +220,8 @@ final class AppStore: ObservableObject {
         await liveController.reconcile(
             mode: liveUpdateMode,
             tailscale: probe,
-            repos: Set(ships.map(\.repo)).filter { !$0.isEmpty }.union(knownRepos),
-            ghBinary: resolveGHBinary()
-        ) { [weak self] event in
-            self?.apply(webhookEvent: event)
-        }
+            repos: Set(ships.map(\.repo)).filter { !$0.isEmpty }.union(knownRepos)
+        )
         await MainActor.run {
             self.liveStatus = self.liveController.status
         }
@@ -542,7 +546,9 @@ final class AppStore: ObservableObject {
         liveController.onStatusChange = { [weak self] newStatus in
             Task { @MainActor in self?.liveStatus = newStatus }
         }
-        liveController.restorePersistedRegistrations()
+        liveController.onEvent = { [weak self] event in
+            self?.apply(webhookEvent: event)
+        }
         Task { [weak self] in
             await self?.reconcileLiveMode()
             await MainActor.run { self?.startTailscaleWatcher() }
@@ -777,6 +783,10 @@ final class AppStore: ObservableObject {
         }
 
         hiddenStaleCount = hidden
+        // Flag the initial pipeline snapshot so the empty-state view
+        // can switch from spinner → empty-copy once we've actually
+        // heard back (even if we heard back "nothing").
+        hasLoadedInitialShips = true
         // Sort by activity priority so the most actionable items
         // bubble to the top: running → failed → queued → green →
         // merged/closed. Within a bucket, most recently updated first.

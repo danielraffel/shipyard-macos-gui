@@ -55,7 +55,16 @@ enum LiveUpdateStatus: Equatable {
         case tailscaleNotInstalled
         case tailscaleNotRunning
         case funnelNotPermitted
+        /// Daemon process failed to spawn / exited before the IPC
+        /// socket became reachable. Typically means the shipyard CLI
+        /// install is outdated or broken; check daemon.log.
+        case daemonUnavailable(String)
+        /// The daemon started but its Tailscale Funnel backend
+        /// couldn't bring up the public tunnel. (Reported via
+        /// daemon status, not inferred from socket absence.)
         case tunnelStartFailed(String)
+        /// Generic "daemon started but something internal failed"
+        /// bucket. Used for cases we can't attribute more cleanly.
         case serverStartFailed(String)
 
         var userFacing: String {
@@ -68,10 +77,14 @@ enum LiveUpdateStatus: Equatable {
                 return "Tailscale isn't running."
             case .funnelNotPermitted:
                 return "Funnel isn't permitted on this tailnet."
+            case .daemonUnavailable(let err):
+                return "shipyard daemon didn't start: \(err). "
+                    + "Check ~/Library/Application Support/shipyard/daemon/daemon.log. "
+                    + "Often fixed by upgrading the shipyard CLI."
             case .tunnelStartFailed(let err):
-                return "Couldn't start Tailscale Funnel: \(err)"
+                return "Tailscale Funnel couldn't come up: \(err)"
             case .serverStartFailed(let err):
-                return "Couldn't start local webhook server: \(err)"
+                return "Live mode setup failed: \(err)"
             }
         }
     }

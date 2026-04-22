@@ -264,7 +264,7 @@ struct ShipCardView: View {
         let alert = NSAlert()
         alert.messageText = "Archive tracking for PR #\(ship.prNumber)?"
         let warning = isActivelyRunning
-            ? "\n\n⚠︎ This PR is actively running. Archiving will stop Shipyard from tracking it — any in-flight CI continues on GitHub but won't be visible here."
+            ? "\n\n⚠︎ This PR is actively running. Archiving will stop tracking it here — any running CI continues on GitHub but won't be visible in this app."
             : ""
         alert.informativeText = "Runs:\n  shipyard ship-state discard \(ship.prNumber)\n\nThe CLI keeps a tombstone; the underlying file is not deleted. You can re-list it from the terminal.\(warning)"
         alert.alertStyle = isActivelyRunning ? .critical : .warning
@@ -457,7 +457,7 @@ struct ShipCardView: View {
                 .foregroundStyle(.blue)
             }
             .buttonStyle(.plain)
-            .help("Add a new target lane to this in-flight ship")
+            .help("Add a new target lane to this active PR")
 
             Toggle(isOn: Binding(
                 get: { ship.autoMerge },
@@ -512,8 +512,12 @@ struct ShipCardView: View {
             }()
             switch effective {
             case .passed:
+                // Intentionally *not* the merge arrow — reserve that
+                // icon for actually-merged PRs above. Open+green uses a
+                // plain check so reviewers can tell at a glance whether
+                // the PR has landed or is still awaiting merge.
                 label = "green"; color = ShipyardColors.green
-                icon = "arrow.trianglehead.merge"
+                icon = "checkmark.circle.fill"
             case .failed:
                 label = "failed"; color = ShipyardColors.red; icon = nil
             case .running:
