@@ -25,42 +25,34 @@ actor ShipyardPipeline {
     ///
     /// On startup we must ALWAYS drive the store past its
     /// `hasLoadedInitialShips == false` state so the view can stop
-    /// showing a spinner. If the very first poll returns nil (binary
-    /// exec failed, empty stdout, JSON decode failed — all collapse to
-    /// nil silently inside the poller), the prior version discarded
-    /// the nil and waited another 7s. That put the spinner on a
-    /// forever-loop with no visible signal to the user. Now we emit
-    /// an empty snapshot once after a short retry so the UI flips to
-    /// the "no ships" empty-copy (which is at least truthful: we
-    /// couldn't find any ships). Subsequent polls still refresh.
+    /// showing a spinner. Two distinct problems we're solving:
+    ///
+    ///   (1) The shipyard CLI is a PyInstaller onefile binary that
+    ///       cold-starts in 5-6s per invocation. A user who opens the
+    ///       menu bar sees a "Loading PRs…" spinner for that window
+    ///       every time. Emit an empty snapshot IMMEDIATELY on start
+    ///       so the UI flips to its "no active PRs" state in a tick;
+    ///       the real snapshot replaces it whenever the first fetch
+    ///       returns. Brief flicker (empty → ships) is preferable to
+    ///       a 5s spinner that looks like the app is broken.
+    ///
+    ///   (2) If the poller never returns non-nil (binary exec failed,
+    ///       empty stdout, JSON decode failed — all collapse to nil
+    ///       silently inside ShipStateListPoller.fetch), the prior
+    ///       version discarded the nil and waited another 7s. That
+    ///       put the spinner on a forever-loop. Firing the immediate
+    ///       empty snapshot resolves that case too: we've flipped
+    ///       hasLoadedInitialShips=true, so subsequent failures don't
+    ///       re-strand the user on the loading screen.
     func start(onSnapshot: @escaping @Sendable ([ShipStateListEntry]) -> Void) {
         stop()
+        // Fire the empty snapshot before the first fetch so the
+        // spinner clears within milliseconds of app launch.
+        onSnapshot([])
         discoveryTask = Task {
-            var sawFirstSnapshot = false
             while !Task.isCancelled {
-                let fetched = await ShipStateListPoller.fetch(binary: self.binary)
-                if let entries = fetched {
-                    sawFirstSnapshot = true
+                if let entries = await ShipStateListPoller.fetch(binary: self.binary) {
                     onSnapshot(entries)
-                } else if !sawFirstSnapshot {
-                    // First poll failed. Retry after 1s before giving
-                    // up on this cycle — transient subprocess hiccups
-                    // (spawn race, hardened-runtime first-run prompt)
-                    // often resolve on the second attempt.
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    let retry = await ShipStateListPoller.fetch(binary: self.binary)
-                    if let entries = retry {
-                        sawFirstSnapshot = true
-                        onSnapshot(entries)
-                    } else {
-                        // Give up for the initial render — emit an
-                        // empty snapshot so the store clears the
-                        // initial-loading spinner. Regular 7s polls
-                        // still retry; if a later poll succeeds the
-                        // UI populates normally.
-                        sawFirstSnapshot = true
-                        onSnapshot([])
-                    }
                 }
                 try? await Task.sleep(nanoseconds: 7_000_000_000) // 7s
             }
