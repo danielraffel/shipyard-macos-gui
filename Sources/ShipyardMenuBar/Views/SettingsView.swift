@@ -57,9 +57,23 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Live · via Tailscale Funnel")
                         .font(.system(size: 11, weight: .medium))
-                    Text(liveStatusDetail(lastEventAt: lastEventAt))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                    // Tick every second so the "last event Ns ago"
+                    // string is a real counter, not a coarse 10s-bucket
+                    // jump. Prior version used `.periodic(by: 10)` +
+                    // `RelativeDateTimeFormatter(.short)`: the user saw
+                    // "38 sec." freeze for many seconds at a time, then
+                    // skip to "1 min." — it didn't look live at all,
+                    // which is exactly the opposite signal we want when
+                    // the whole purpose of this line is to show the
+                    // tunnel is healthy.
+                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                        Text(liveStatusDetail(
+                            lastEventAt: lastEventAt, now: ctx.date
+                        ))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
                     // URL on its own line so the hostname doesn't get
                     // middle-truncated away.
                     Text(url.host ?? url.absoluteString)
@@ -111,11 +125,9 @@ struct SettingsView: View {
         return .secondary
     }
 
-    private func liveStatusDetail(lastEventAt: Date?) -> String {
+    private func liveStatusDetail(lastEventAt: Date?, now: Date = Date()) -> String {
         if let last = lastEventAt {
-            let f = RelativeDateTimeFormatter()
-            f.unitsStyle = .short
-            return "last event \(f.localizedString(for: last, relativeTo: Date()))"
+            return "last event \(formatAgeLive(since: last, now: now))"
         }
         // The tunnel is up + webhooks are registered — but we haven't
         // received a delivery since the app launched. Don't imply the
@@ -123,10 +135,37 @@ struct SettingsView: View {
         return "tunnel active · no events yet this session"
     }
 
+    /// Hand-rolled age formatter that produces a real ticking counter.
+    /// `RelativeDateTimeFormatter(.short)` rounds to word-scale units
+    /// ("38 sec." → "1 min.") which defeats the purpose of a 1s tick.
+    /// Output shape:
+    ///   < 60s  → "3s ago"
+    ///   < 1h   → "2m 05s ago"
+    ///   < 24h  → "3h 04m ago"
+    ///   ≥ 24h  → "2d ago"
+    private func formatAgeLive(since: Date, now: Date) -> String {
+        let secs = max(0, Int(now.timeIntervalSince(since)))
+        if secs < 60 {
+            return "\(secs)s ago"
+        }
+        if secs < 3600 {
+            let m = secs / 60
+            let s = secs % 60
+            return String(format: "%dm %02ds ago", m, s)
+        }
+        if secs < 86_400 {
+            let h = secs / 3600
+            let m = (secs % 3600) / 60
+            return String(format: "%dh %02dm ago", h, m)
+        }
+        let days = secs / 86_400
+        return "\(days)d ago"
+    }
+
     private var githubSection: some View {
         Section("GitHub Actions") {
             Toggle("Show runs from github.com", isOn: $store.showGitHubActions)
-                .help("Polls `gh run list` every 60s for each repo you've shipped from this machine")
+                .help("Polls `gh run list` every 60s for each repo this machine has opened a PR from")
             Picker("Time window", selection: $store.ghWindowMinutes) {
                 Text("1 hour").tag(60)
                 Text("4 hours").tag(240)
@@ -138,7 +177,7 @@ struct SettingsView: View {
                       prompt: Text("e.g. post-tag-sync, changelog"))
                 .help("Comma-separated substrings. A run is hidden when its workflow name contains any of these.")
                 .disabled(!store.showGitHubActions)
-            Text("Runs already represented by a local ship card are auto-deduplicated by head_sha.")
+            Text("Runs already represented by a local PR card are auto-deduplicated by head_sha.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }
@@ -242,7 +281,7 @@ struct SettingsView: View {
     private var developerSection: some View {
         Section("Developer") {
             Toggle("Show demo data", isOn: $store.showDemoData)
-            Text("Replaces live polling with fixture PRs. Useful for previewing the UI when nothing is in flight.")
+            Text("Replaces live polling with fixture PRs. Useful for previewing the UI when no PRs are active.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }

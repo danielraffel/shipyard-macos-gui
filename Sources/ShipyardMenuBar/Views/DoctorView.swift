@@ -8,17 +8,22 @@ struct DoctorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 header
-                if store.cliBinaryResolved == nil {
-                    missingCLI
-                } else if let result = store.doctorResult {
-                    ForEach(result.sections) { section in
-                        sectionView(section)
+                Group {
+                    if store.cliBinaryResolved == nil {
+                        missingCLI
+                    } else if let result = store.doctorResult {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(result.sections) { section in
+                                sectionView(section)
+                            }
+                        }
+                        .transition(.opacity.combined(with: .offset(y: 4)))
+                    } else {
+                        loadingState
+                            .transition(.opacity)
                     }
-                } else {
-                    ProgressView("Running doctor…")
-                        .controlSize(.small)
-                        .padding(.top, 20)
                 }
+                .animation(.easeInOut(duration: 0.25), value: store.doctorResult != nil)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("What this checked")
@@ -29,6 +34,27 @@ struct DoctorView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                    if let desktopVersion = Self.desktopAppVersion() {
+                        HStack(spacing: 6) {
+                            Text("Desktop app: \(desktopVersion)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                                .textSelection(.enabled)
+                            Button {
+                                ClipboardToast.shared.copy(
+                                    diagnosticsDump(desktopVersion: desktopVersion),
+                                    label: "Copied diagnostics"
+                                )
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy desktop version + every Doctor row as a diagnostics bundle")
+                        }
+                        .padding(.top, 2)
+                    }
                 }
                 .padding(.top, 10)
             }
@@ -74,6 +100,59 @@ struct DoctorView: View {
             .controlSize(.small)
             .disabled(checking || store.cliBinaryResolved == nil)
             .help("Run `shipyard doctor --json` again")
+        }
+    }
+
+    /// Skeleton loading state — two ghost "section" blocks matching
+    /// the real sectionView layout so the transition in doesn't jolt
+    /// the user. Previously showed a lone tiny ProgressView floating
+    /// at the top-left which felt like nothing was happening.
+    private var loadingState: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(0..<2, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 80, height: 9)
+                    VStack(spacing: 0) {
+                        ForEach(0..<2, id: \.self) { idx in
+                            HStack(alignment: .top, spacing: 8) {
+                                Circle()
+                                    .fill(Color.primary.opacity(0.08))
+                                    .frame(width: 12, height: 12)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color.primary.opacity(0.12))
+                                        .frame(width: 60, height: 10)
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color.primary.opacity(0.06))
+                                        .frame(width: 120, height: 8)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                            if idx == 0 { Divider().opacity(0.3) }
+                        }
+                    }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.background.opacity(0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(.separator.opacity(0.4), lineWidth: 0.5)
+                            )
+                    )
+                }
+            }
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Running doctor…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 4)
         }
     }
 
@@ -176,5 +255,50 @@ struct DoctorView: View {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Build a one-block plaintext diagnostics bundle suitable for pasting
+    /// into an issue / Slack / DM. Includes the desktop version, every
+    /// Doctor section + entry (name / version / detail), and the current
+    /// shipyard CLI path. Intentionally plain text, not markdown, so it
+    /// reads cleanly wherever it's pasted.
+    private func diagnosticsDump(desktopVersion: String) -> String {
+        var lines: [String] = []
+        lines.append("Desktop app: \(desktopVersion)")
+        if let cli = store.cliBinaryResolved {
+            lines.append("Shipyard CLI path: \(cli)")
+        }
+        if let result = store.doctorResult {
+            lines.append("Doctor: \(result.ok ? "Ready" : "Issues detected")")
+            for section in result.sections {
+                lines.append("")
+                lines.append("[\(section.name)]")
+                for entry in section.entries {
+                    var row = "\(entry.ok ? "✓" : "✗") \(entry.name)"
+                    if let v = entry.version { row += " — \(v)" }
+                    if let d = entry.detail, !d.isEmpty { row += " — \(d)" }
+                    lines.append(row)
+                }
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Returns a short version string for the running desktop app bundle,
+    /// e.g. `"0.1.2 (build 42)"`. Returns nil if neither key is readable,
+    /// which lets the caller skip rendering the row.
+    ///
+    /// Surfaced in the Doctor footer so users can answer "am I running the
+    /// fixed build?" without inspecting the .app bundle or Finder Get Info.
+    static func desktopAppVersion() -> String? {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let short = info["CFBundleShortVersionString"] as? String
+        let build = info["CFBundleVersion"] as? String
+        switch (short, build) {
+        case let (.some(s), .some(b)) where s != b: return "\(s) (build \(b))"
+        case let (.some(s), _):                     return s
+        case let (_, .some(b)):                     return "build \(b)"
+        default:                                    return nil
+        }
     }
 }

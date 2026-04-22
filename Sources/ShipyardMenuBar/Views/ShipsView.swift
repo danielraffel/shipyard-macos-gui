@@ -2,6 +2,10 @@ import SwiftUI
 
 struct ShipsView: View {
     @EnvironmentObject var store: AppStore
+    /// Local flag so tapping "Show all N" gives immediate
+    /// ProgressView feedback while the pipeline re-polls. Reset when
+    /// ships actually appear (see .onChange below).
+    @State private var isRestoring: Bool = false
 
     var body: some View {
         ScrollView {
@@ -24,6 +28,16 @@ struct ShipsView: View {
                 }
             }
             .padding(12)
+        }
+        // Reset the "loading" state the moment ships actually show up.
+        // Without this the spinner would spin forever — `isRestoring`
+        // is a local flag with no other reset path. Using the macOS
+        // 13-compatible single-arg form (iOS 17 / macOS 14 widened
+        // the API to include old/new tuple).
+        .onChange(of: store.ships.count) { newCount in
+            if newCount > 0 {
+                isRestoring = false
+            }
         }
     }
 
@@ -114,13 +128,13 @@ struct ShipsView: View {
     /// is filtered to empty.
     private var scopeFooterText: String {
         guard store.showGitHubActions else {
-            return "Tracked PRs you've shipped with Shipyard. Enable GitHub Actions in Settings to see more."
+            return "Tracked PRs from this machine. Enable GitHub Actions in Settings to see more."
         }
         let hasUnrelated = !store.unrelatedGitHubRuns().isEmpty
         if hasUnrelated {
-            return "Tracked PRs you've shipped with Shipyard and recent GitHub Actions."
+            return "Tracked PRs from this machine and recent GitHub Actions."
         }
-        return "Tracked PRs you've shipped with Shipyard."
+        return "Tracked PRs from this machine."
     }
 
     private var groupedView: some View {
@@ -242,18 +256,60 @@ struct ShipsView: View {
         .help("List actions")
     }
 
+    /// Shown on cold launch for the ~1-2s before the pipeline returns
+    /// its first ship-state snapshot. Without this the user sees the
+    /// "No active PRs" anchor + copy and assumes nothing's tracked —
+    /// even though we're still loading.
+    private var initialLoadingState: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.regular)
+                .padding(.top, 60)
+            Text("Loading PRs…")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Image(systemName: "anchor")
-                .font(.system(size: 44, weight: .ultraLight))
-                .foregroundStyle(.tertiary)
-                .padding(.top, 60)
-            if store.hiddenStaleCount > 0 && store.cliBinaryResolved != nil {
-                hiddenStaleBlock
+            // Three exclusive states — one and only one can render.
+            // The prior version had two sibling if/else blocks (spinner
+            // OR anchor / then one of three copy blocks), which let the
+            // "Loading PRs…" spinner coexist with the "No active PRs /
+            // Run shipyard pr" empty-state copy. A reader saw both at
+            // once and couldn't tell whether the app was still fetching
+            // or had finished with nothing.
+            if !store.hasLoadedInitialShips && store.cliBinaryResolved != nil {
+                initialLoadingState
+                    .transition(.opacity)
             } else if store.cliBinaryResolved == nil {
-                cliMissingBlock
+                VStack(spacing: 10) {
+                    Image(systemName: "anchor")
+                        .font(.system(size: 44, weight: .ultraLight))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 60)
+                    cliMissingBlock
+                }
+                .transition(.opacity)
+            } else if store.hiddenStaleCount > 0 {
+                VStack(spacing: 10) {
+                    Image(systemName: "anchor")
+                        .font(.system(size: 44, weight: .ultraLight))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 60)
+                    hiddenStaleBlock
+                }
+                .transition(.opacity)
             } else {
-                nothingInFlightBlock
+                VStack(spacing: 10) {
+                    Image(systemName: "anchor")
+                        .font(.system(size: 44, weight: .ultraLight))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 60)
+                    nothingInFlightBlock
+                }
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -261,7 +317,7 @@ struct ShipsView: View {
 
     private var hiddenStaleBlock: some View {
         VStack(spacing: 4) {
-            Text("Nothing in flight")
+            Text("No active PRs")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary)
             Text("\(store.hiddenStaleCount) completed state\(store.hiddenStaleCount == 1 ? "" : "s") hidden by auto-clear.")
@@ -269,23 +325,46 @@ struct ShipsView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
-            Text("The CLI retains finished ships past the auto-clear interval. None are actively running.")
+            Text("The CLI retains completed PRs past the auto-clear interval. None are actively running.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
+            // Restore is semi-async — restartPipelineIfPossible kicks a
+            // fresh `shipyard ship-state list` poll which can take a
+            // couple seconds before ships populate. Without immediate
+            // feedback the tap feels lost: the old empty-state sits
+            // there silently, then PRs pop in. Local `isRestoring`
+            // flag shows a ProgressView the moment the button's hit
+            // so the user knows the tap registered.
             Button {
+                isRestoring = true
                 store.showStale = true
                 store.restartPipelineIfPossible()
             } label: {
-                Text("Show all \(store.hiddenStaleCount)")
-                    .font(.system(size: 11, weight: .medium))
+                HStack(spacing: 6) {
+                    if isRestoring {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("Loading…")
+                            .font(.system(size: 11, weight: .medium))
+                    } else {
+                        Text("Show all \(store.hiddenStaleCount)")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .padding(.top, 6)
+            .disabled(isRestoring)
             .help("Show every PR the CLI is tracking")
         }
+        // Empty-state transitions out with a gentle fade as ships load
+        // in. Tied to ship count so the animation fires exactly when
+        // the pipeline poll returns data, not a moment before.
+        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+        .animation(.easeInOut(duration: 0.25), value: store.ships.count)
     }
 
     private var cliMissingBlock: some View {
@@ -311,10 +390,10 @@ struct ShipsView: View {
 
     private var nothingInFlightBlock: some View {
         VStack(spacing: 4) {
-            Text("Nothing in flight")
+            Text("No active PRs")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary)
-            Text("Run \u{201C}shipyard ship\u{201D} in a worktree to see progress here.")
+            Text("Run \u{201C}shipyard pr\u{201D} in a worktree to see progress here.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

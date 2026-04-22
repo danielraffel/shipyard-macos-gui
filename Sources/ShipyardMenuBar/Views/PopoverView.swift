@@ -31,7 +31,14 @@ struct PopoverView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(.regularMaterial)
+        // NOTE: No explicit background here. NSPopover supplies its
+        // own material behind the content, and critically draws its
+        // callout arrow with that SAME material. Adding .background
+        // here (previously `.regularMaterial`) painted SwiftUI's own
+        // material over the popover's — different enough in light
+        // mode that the arrow looked like a mismatched lighter patch
+        // at the top edge. Letting the native material show through
+        // keeps content + arrow visually identical.
         .overlay(alignment: .bottom) {
             ClipboardToastView()
                 .padding(.bottom, 14)
@@ -74,12 +81,20 @@ struct PopoverView: View {
                             .labelStyle(.titleAndIcon)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(tab == t ? Color.primary : Color.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
+                            // Generous interior padding so the visible pill
+                            // is large enough not to feel fiddly. 12/8 was
+                            // 8/4 before — users reported mis-taps.
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
                                     .fill(tab == t ? Color.primary.opacity(0.08) : .clear)
                             )
+                            // contentShape extends the HIT region even when
+                            // the visible pill is idle-transparent — clicks
+                            // on whitespace inside the padded rect still
+                            // register, not just on the glyph/text.
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                     .help("Show \(t.rawValue)")
@@ -87,18 +102,29 @@ struct PopoverView: View {
                 Spacer()
             }
             .padding(.horizontal, 10)
-            .padding(.bottom, 6)
+            .padding(.bottom, 8)
         }
     }
 
+    /// Header status reflects **connection/service state**, not the roll-up
+    /// of every tracked PR's CI outcome. Per-PR outcomes are already visible
+    /// on each card and summarized in the "X green · Y failed" counter row.
+    /// Rolling CI failures into the header read as service-level failure
+    /// ("Shipyard · failed") which was misleading.
     @ViewBuilder
     private var statusDot: some View {
         let (color, label): (Color, String) = {
-            switch store.overallBadge {
-            case .failed: return (ShipyardColors.red, "failed")
-            case .allGreen: return (ShipyardColors.green, "all green")
-            case .running: return (ShipyardColors.blue, "running")
-            case .idle: return (.secondary, "idle")
+            if store.cliBinaryResolved == nil {
+                return (ShipyardColors.red, "CLI not found")
+            }
+            switch store.liveStatus {
+            case .live:
+                return (ShipyardColors.green, "live")
+            case .polling(let reason):
+                if reason == .userDisabled {
+                    return (.secondary, "polling (manual)")
+                }
+                return (.secondary, "polling")
             }
         }()
         HStack(spacing: 4) {

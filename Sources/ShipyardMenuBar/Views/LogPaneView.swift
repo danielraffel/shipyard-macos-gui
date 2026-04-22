@@ -106,12 +106,38 @@ struct LogPaneView: View {
         // through `gh run view --log`, shipyard-native go through
         // `shipyard logs`.
         if let ghRunId = target.githubRunId, let repo = target.githubRepo {
+            let gh = resolveGH() ?? "/opt/homebrew/bin/gh"
+            // Check run state first so we can tell "not complete yet"
+            // apart from "expired" apart from "available but empty".
+            // GitHub's --log endpoint only serves completed runs;
+            // calling it while the run is in progress returns zero
+            // bytes with no error, which otherwise reads as a bug.
+            let stateJSON = await runGHCapturing(
+                executable: gh,
+                args: [
+                    "run", "view", "\(ghRunId)", "--repo", repo,
+                    "--json", "status,conclusion,databaseId",
+                ]
+            )
+            let runState = Self.parseRunState(stateJSON)
+            if runState.notFound {
+                output = "Run \(ghRunId) not found on GitHub (may have been deleted or expired beyond the retention window)."
+                return
+            }
+            if runState.isInProgress {
+                output = "Job is still running — GitHub only serves logs after completion.\n\nClose this pane and reopen after the run finishes, or click 'Open in Terminal' to tail `gh run watch`."
+                return
+            }
+            if runState.isQueued {
+                output = "Job is queued — hasn't started yet. Logs will appear once the run begins executing and completes."
+                return
+            }
             let raw = await runGHCapturing(
-                executable: resolveGH() ?? "/opt/homebrew/bin/gh",
+                executable: gh,
                 args: ["run", "view", "\(ghRunId)", "--repo", repo, "--log"]
             )
             if raw.isEmpty {
-                output = "No log content returned by gh. The run may have expired or the job isn't complete yet."
+                output = "Run completed (\(runState.conclusion ?? "unknown")) but GitHub returned no log content — likely expired past the 90-day retention window."
             } else {
                 // gh's --log is big; only keep the tail for the
                 // inline pane. "Open in Terminal" is the power path.
@@ -147,5 +173,36 @@ struct LogPaneView: View {
     private func resolveGH() -> String? {
         ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
             .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// Parse the JSON output of `gh run view --json status,conclusion`
+    /// into a structured state. Used so the log pane can distinguish
+    /// "not complete yet" from "expired" from "legitimately empty" —
+    /// all three were previously indistinguishable to the user.
+    fileprivate struct RunState {
+        let status: String?
+        let conclusion: String?
+        let notFound: Bool
+        var isInProgress: Bool { (status ?? "") == "in_progress" }
+        var isQueued: Bool {
+            let s = status ?? ""
+            return s == "queued" || s == "waiting" || s == "pending"
+        }
+    }
+
+    fileprivate static func parseRunState(_ raw: String) -> RunState {
+        guard !raw.isEmpty else {
+            return RunState(status: nil, conclusion: nil, notFound: true)
+        }
+        guard let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return RunState(status: nil, conclusion: nil, notFound: false)
+        }
+        return RunState(
+            status: obj["status"] as? String,
+            conclusion: obj["conclusion"] as? String,
+            notFound: false,
+        )
     }
 }

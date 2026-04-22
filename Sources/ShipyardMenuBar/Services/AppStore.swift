@@ -4,6 +4,10 @@ import Combine
 @MainActor
 final class AppStore: ObservableObject {
     @Published var ships: [Ship] = []
+    /// False until the first pipeline snapshot arrives. Used by the
+    /// empty-state view to distinguish "we haven't loaded yet" (show
+    /// spinner) from "truly no active PRs" (show anchor + copy).
+    @Published var hasLoadedInitialShips: Bool = false
 
     @Published var cliBinaryPath: String = UserDefaults.standard.string(forKey: Keys.cliBinaryPath) ?? "" {
         didSet {
@@ -34,11 +38,24 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(resumePromptOnWake, forKey: Keys.resumePromptOnWake) }
     }
     @Published var autoClearPassedMinutes: Int = UserDefaults.standard.object(forKey: Keys.autoClearPassedMinutes) as? Int ?? 60 {
-        didSet { UserDefaults.standard.set(autoClearPassedMinutes, forKey: Keys.autoClearPassedMinutes) }
+        didSet {
+            UserDefaults.standard.set(autoClearPassedMinutes, forKey: Keys.autoClearPassedMinutes)
+            reapplyAutoClearFilter()
+        }
     }
     @Published var autoClearFailedMinutes: Int = UserDefaults.standard.object(forKey: Keys.autoClearFailedMinutes) as? Int ?? 240 {
-        didSet { UserDefaults.standard.set(autoClearFailedMinutes, forKey: Keys.autoClearFailedMinutes) }
+        didSet {
+            UserDefaults.standard.set(autoClearFailedMinutes, forKey: Keys.autoClearFailedMinutes)
+            reapplyAutoClearFilter()
+        }
     }
+
+    /// The most recent `updated` list from applySnapshot, kept unfiltered
+    /// so auto-clear setting changes can be re-applied instantly without
+    /// waiting for the next 7s poll (which also incurs the ~5-6s CLI
+    /// cold-start). Populated inside applySnapshot; read by
+    /// `reapplyAutoClearFilter`.
+    private var lastRawSnapshot: [Ship] = []
     @Published var groupByWorktree: Bool = UserDefaults.standard.bool(forKey: Keys.groupByWorktree) {
         didSet { UserDefaults.standard.set(groupByWorktree, forKey: Keys.groupByWorktree) }
     }
@@ -131,7 +148,9 @@ final class AppStore: ObservableObject {
     }
 
     @Published var hiddenStaleCount: Int = 0
-    @Published var showStale: Bool = false
+    @Published var showStale: Bool = false {
+        didSet { reapplyAutoClearFilter() }
+    }
 
     // MARK: - GitHub Actions
 
@@ -200,11 +219,14 @@ final class AppStore: ObservableObject {
     /// + every 60s while the app is open.
     @Published private(set) var tailscaleStatus: TailscaleStatus?
 
-    private let liveController = LiveModeController()
+    private let liveController = DaemonClient()
     private var tailscaleProbeTask: Task<Void, Never>?
 
-    /// Re-probe Tailscale and reconcile the live controller. Safe to
-    /// call from anywhere — handles its own @MainActor hop.
+    /// Re-probe Tailscale and reconcile the daemon client. The live-
+    /// mode pipeline (webhook server, tunnel, registrations) now runs
+    /// in the shipyard CLI as `shipyard daemon`; this method is the
+    /// GUI-side driver that decides whether to spawn + subscribe.
+    /// Safe to call from anywhere — handles its own @MainActor hop.
     func reconcileLiveMode() async {
         let probe = await TailscaleProbe.probe()
         await MainActor.run {
@@ -213,11 +235,8 @@ final class AppStore: ObservableObject {
         await liveController.reconcile(
             mode: liveUpdateMode,
             tailscale: probe,
-            repos: Set(ships.map(\.repo)).filter { !$0.isEmpty }.union(knownRepos),
-            ghBinary: resolveGHBinary()
-        ) { [weak self] event in
-            self?.apply(webhookEvent: event)
-        }
+            repos: Set(ships.map(\.repo)).filter { !$0.isEmpty }.union(knownRepos)
+        )
         await MainActor.run {
             self.liveStatus = self.liveController.status
         }
@@ -542,7 +561,9 @@ final class AppStore: ObservableObject {
         liveController.onStatusChange = { [weak self] newStatus in
             Task { @MainActor in self?.liveStatus = newStatus }
         }
-        liveController.restorePersistedRegistrations()
+        liveController.onEvent = { [weak self] event in
+            self?.apply(webhookEvent: event)
+        }
         Task { [weak self] in
             await self?.reconcileLiveMode()
             await MainActor.run { self?.startTailscaleWatcher() }
@@ -745,20 +766,49 @@ final class AppStore: ObservableObject {
             fetchRunsForShipOnDemand(ship)
         }
 
-        // Auto-clear stale terminal ships. `shipyard ship-state list`
-        // returns every state that wasn't explicitly archived, which
-        // includes ships from weeks ago. Showing those poisons the
-        // overall badge (any old fail → "failed"). Honor the
-        // Settings → Auto-clear intervals.
-        //
-        // "Terminal" includes: overallStatus == .passed / .failed OR
-        // PR state is merged / closed. Ships with empty targets (and
-        // therefore .pending status) would otherwise never age out
-        // even when their PR merged long ago — the merged signal from
-        // PR state catches them.
+        // Cache the unfiltered list so auto-clear setting changes can
+        // re-run the filter without forcing a fresh poll (which costs
+        // ~5-6s for the CLI cold start).
+        lastRawSnapshot = updated
+        // Flag the initial pipeline snapshot so the empty-state view
+        // can switch from spinner → empty-copy once we've actually
+        // heard back (even if we heard back "nothing").
+        hasLoadedInitialShips = true
+        // Auto-clear stale terminal ships. Delegated to
+        // `reapplyAutoClearFilter` so setting changes can re-run it
+        // against `lastRawSnapshot` without a full snapshot cycle.
+        reapplyAutoClearFilter()
+        let previousRepos = knownRepos
+        knownRepos.formUnion(updated.map(\.repo).filter { !$0.isEmpty })
+        // If the snapshot surfaced new repos after live mode
+        // reconciled at launch (empty-repo race), re-run reconcile
+        // so webhooks get registered on them.
+        if knownRepos != previousRepos {
+            Task { [weak self] in await self?.reconcileLiveMode() }
+        }
+        reseedAutoExpand()
+        detectBadgeTransition()
+    }
+
+    /// Re-run the auto-clear filter against the cached raw snapshot
+    /// and publish the resulting `ships` + `hiddenStaleCount`.
+    ///
+    /// Called from two places:
+    ///   1. `applySnapshot`, after caching the raw `updated` list.
+    ///   2. `didSet` on `autoClearPassedMinutes`/`autoClearFailedMinutes`
+    ///      so a settings toggle re-filters immediately instead of
+    ///      waiting up to ~12s for the next 7s poll + 5-6s CLI cold
+    ///      start to land a fresh snapshot.
+    ///
+    /// "Terminal" includes `overallStatus == .passed / .failed` OR PR
+    /// state is `merged / closed`. Ships with empty targets (and
+    /// therefore `.pending` status) would otherwise never age out
+    /// even when their PR merged long ago — the merged signal from PR
+    /// state catches them.
+    private func reapplyAutoClearFilter() {
         let now = Date()
         var hidden = 0
-        let filtered = updated.filter { ship in
+        let filtered = lastRawSnapshot.filter { ship in
             let status = ship.overallStatus
             let pr = prState(for: ship)
             let isTerminalByStatus = status == .passed || status == .failed
@@ -780,23 +830,13 @@ final class AppStore: ObservableObject {
         // Sort by activity priority so the most actionable items
         // bubble to the top: running → failed → queued → green →
         // merged/closed. Within a bucket, most recently updated first.
-        ships = (showStale ? updated : filtered)
+        ships = (showStale ? lastRawSnapshot : filtered)
             .sorted { a, b in
                 let ap = activityRank(for: a)
                 let bp = activityRank(for: b)
                 if ap != bp { return ap < bp }
                 return a.startedAt > b.startedAt
             }
-        let previousRepos = knownRepos
-        knownRepos.formUnion(updated.map(\.repo).filter { !$0.isEmpty })
-        // If the snapshot surfaced new repos after live mode
-        // reconciled at launch (empty-repo race), re-run reconcile
-        // so webhooks get registered on them.
-        if knownRepos != previousRepos {
-            Task { [weak self] in await self?.reconcileLiveMode() }
-        }
-        reseedAutoExpand()
-        detectBadgeTransition()
     }
 
     /// Lower rank = higher in the list. Uses PR state when we have it
