@@ -87,15 +87,26 @@ final class DaemonClient {
         mode: LiveUpdateMode,
         tailscale: TailscaleStatus
     ) -> (attemptLive: Bool, reason: LiveUpdateStatus.PollingReason?) {
+        // Historical behavior gated `attemptLive` on our local
+        // tailscale probe. The probe can fail inside a signed release
+        // bundle for reasons that DON'T affect the daemon — e.g. the
+        // Tailscale.app binary being in a location the GUI app can't
+        // exec, subtle Process.run env differences, etc. Meanwhile
+        // the daemon (which has its own probe using the right PATH)
+        // might already have a live tunnel.
+        //
+        // Flip the gate: in Auto/On mode, always attempt to connect
+        // to the daemon. If the daemon can't start (really missing
+        // Tailscale, funnel permission denied, etc.) it exits with
+        // code 3 and `ensureDaemonRunning` routes the real error
+        // through `onDisconnect` → `.polling(reason: .daemonUnavailable(...))`.
+        // That way the failure message reflects the daemon's
+        // authoritative view, not the GUI's speculative probe.
         switch mode {
         case .off:
             return (false, .userDisabled)
         case .auto, .on:
-            if tailscale.isReady { return (true, nil) }
-            if tailscale.binaryPath == nil { return (false, .tailscaleNotInstalled) }
-            if tailscale.backendState != "Running" { return (false, .tailscaleNotRunning) }
-            if !tailscale.funnelPermitted { return (false, .funnelNotPermitted) }
-            return (false, .tailscaleNotRunning)
+            return (true, nil)
         }
     }
 

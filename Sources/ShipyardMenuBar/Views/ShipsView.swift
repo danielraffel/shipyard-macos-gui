@@ -256,12 +256,37 @@ struct ShipsView: View {
         .help("List actions")
     }
 
+    /// Shown on cold launch for the ~1-2s before the pipeline returns
+    /// its first ship-state snapshot. Without this the user sees the
+    /// "No active PRs" anchor + copy and assumes nothing's tracked —
+    /// even though we're still loading.
+    private var initialLoadingState: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.regular)
+                .padding(.top, 60)
+            Text("Loading PRs…")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Image(systemName: "anchor")
-                .font(.system(size: 44, weight: .ultraLight))
-                .foregroundStyle(.tertiary)
-                .padding(.top, 60)
+            // On first launch the pipeline hasn't emitted a snapshot
+            // yet — showing the "No active PRs" copy during that
+            // window is a lie, so render a spinner instead.
+            if !store.hasLoadedInitialShips && store.cliBinaryResolved != nil {
+                initialLoadingState
+                    .transition(.opacity)
+                    .onAppear { /* just trigger animation */ }
+            } else {
+                Image(systemName: "anchor")
+                    .font(.system(size: 44, weight: .ultraLight))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 60)
+                    .transition(.opacity)
+            }
             if store.hiddenStaleCount > 0 && store.cliBinaryResolved != nil {
                 hiddenStaleBlock
             } else if store.cliBinaryResolved == nil {

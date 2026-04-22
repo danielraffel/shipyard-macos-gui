@@ -4,6 +4,10 @@ import Combine
 @MainActor
 final class AppStore: ObservableObject {
     @Published var ships: [Ship] = []
+    /// False until the first pipeline snapshot arrives. Used by the
+    /// empty-state view to distinguish "we haven't loaded yet" (show
+    /// spinner) from "truly no active PRs" (show anchor + copy).
+    @Published var hasLoadedInitialShips: Bool = false
 
     @Published var cliBinaryPath: String = UserDefaults.standard.string(forKey: Keys.cliBinaryPath) ?? "" {
         didSet {
@@ -779,6 +783,10 @@ final class AppStore: ObservableObject {
         }
 
         hiddenStaleCount = hidden
+        // Flag the initial pipeline snapshot so the empty-state view
+        // can switch from spinner → empty-copy once we've actually
+        // heard back (even if we heard back "nothing").
+        hasLoadedInitialShips = true
         // Sort by activity priority so the most actionable items
         // bubble to the top: running → failed → queued → green →
         // merged/closed. Within a bucket, most recently updated first.
