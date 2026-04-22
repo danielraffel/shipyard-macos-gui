@@ -1,10 +1,12 @@
 import SwiftUI
+import ServiceManagement
 
 struct SettingsView: View {
     @EnvironmentObject var store: AppStore
 
     var body: some View {
         Form {
+            generalSection
             cliSection
             liveUpdatesSection
             githubSection
@@ -16,6 +18,34 @@ struct SettingsView: View {
             #endif
         }
         .formStyle(.grouped)
+    }
+
+    private var generalSection: some View {
+        Section("General") {
+            Toggle("Launch Shipyard at login", isOn: $store.launchAtLogin)
+            Text(launchAtLoginFootnote)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Keep the user informed when the OS-level status disagrees with
+    /// the toggle — usually because macOS prompted for approval and
+    /// they deferred, or they flipped the switch in System Settings.
+    private var launchAtLoginFootnote: String {
+        if store.launchAtLogin {
+            switch store.launchAtLoginSystemStatus {
+            case .enabled:
+                return "Shipyard will open automatically next time you log in."
+            case .requiresApproval:
+                return "macOS needs your approval in System Settings → General → Login Items."
+            case .notRegistered, .notFound:
+                return "Registration didn't take effect. Try toggling off and on again."
+            @unknown default:
+                return "Registration status is unknown — check System Settings → General → Login Items."
+            }
+        }
+        return "Shipyard only starts when you open it manually."
     }
 
     private var liveUpdatesSection: some View {
