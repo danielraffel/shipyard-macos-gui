@@ -186,7 +186,10 @@ final class DaemonClient {
 
     /// Mirrors shipyard's `Config.state_dir` on macOS:
     /// `~/Library/Application Support/shipyard/daemon/daemon.sock`.
-    static func socketPath() -> String {
+    /// Nonisolated so background-queue callers (the one-shot
+    /// ship-state-list fetcher) can compute the path without hopping
+    /// to the main actor just to read an env-derived string.
+    nonisolated static func socketPath() -> String {
         (NSHomeDirectory() as NSString).appendingPathComponent(
             "Library/Application Support/shipyard/daemon/daemon.sock"
         )
@@ -392,6 +395,15 @@ final class DaemonConnection: @unchecked Sendable {
 
     func sendStopRequest() async {
         writeLine("{\"type\":\"stop\"}")
+    }
+
+    /// Write an arbitrary pre-formatted NDJSON line. Used by one-shot
+    /// request/reply helpers (see `ShipStateListPoller.fetchViaDaemon`)
+    /// that need to issue request types outside the three the live
+    /// session sends. Line must NOT include a trailing newline — the
+    /// method adds one to match the NDJSON framing the daemon expects.
+    func sendLine(_ line: String) {
+        writeLine(line)
     }
 
     private func writeLine(_ line: String) {
