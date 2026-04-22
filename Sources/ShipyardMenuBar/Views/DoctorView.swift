@@ -8,17 +8,22 @@ struct DoctorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 header
-                if store.cliBinaryResolved == nil {
-                    missingCLI
-                } else if let result = store.doctorResult {
-                    ForEach(result.sections) { section in
-                        sectionView(section)
+                Group {
+                    if store.cliBinaryResolved == nil {
+                        missingCLI
+                    } else if let result = store.doctorResult {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(result.sections) { section in
+                                sectionView(section)
+                            }
+                        }
+                        .transition(.opacity.combined(with: .offset(y: 4)))
+                    } else {
+                        loadingState
+                            .transition(.opacity)
                     }
-                } else {
-                    ProgressView("Running doctor…")
-                        .controlSize(.small)
-                        .padding(.top, 20)
                 }
+                .animation(.easeInOut(duration: 0.25), value: store.doctorResult != nil)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("What this checked")
@@ -95,6 +100,59 @@ struct DoctorView: View {
             .controlSize(.small)
             .disabled(checking || store.cliBinaryResolved == nil)
             .help("Run `shipyard doctor --json` again")
+        }
+    }
+
+    /// Skeleton loading state — two ghost "section" blocks matching
+    /// the real sectionView layout so the transition in doesn't jolt
+    /// the user. Previously showed a lone tiny ProgressView floating
+    /// at the top-left which felt like nothing was happening.
+    private var loadingState: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(0..<2, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 6) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 80, height: 9)
+                    VStack(spacing: 0) {
+                        ForEach(0..<2, id: \.self) { idx in
+                            HStack(alignment: .top, spacing: 8) {
+                                Circle()
+                                    .fill(Color.primary.opacity(0.08))
+                                    .frame(width: 12, height: 12)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color.primary.opacity(0.12))
+                                        .frame(width: 60, height: 10)
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Color.primary.opacity(0.06))
+                                        .frame(width: 120, height: 8)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                            if idx == 0 { Divider().opacity(0.3) }
+                        }
+                    }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.background.opacity(0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(.separator.opacity(0.4), lineWidth: 0.5)
+                            )
+                    )
+                }
+            }
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Running doctor…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 4)
         }
     }
 

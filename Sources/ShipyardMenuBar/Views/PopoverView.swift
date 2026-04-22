@@ -81,12 +81,20 @@ struct PopoverView: View {
                             .labelStyle(.titleAndIcon)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(tab == t ? Color.primary : Color.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
+                            // Generous interior padding so the visible pill
+                            // is large enough not to feel fiddly. 12/8 was
+                            // 8/4 before — users reported mis-taps.
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
                                     .fill(tab == t ? Color.primary.opacity(0.08) : .clear)
                             )
+                            // contentShape extends the HIT region even when
+                            // the visible pill is idle-transparent — clicks
+                            // on whitespace inside the padded rect still
+                            // register, not just on the glyph/text.
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
                     .help("Show \(t.rawValue)")
@@ -94,7 +102,7 @@ struct PopoverView: View {
                 Spacer()
             }
             .padding(.horizontal, 10)
-            .padding(.bottom, 6)
+            .padding(.bottom, 8)
         }
     }
 

@@ -31,8 +31,10 @@ struct ShipsView: View {
         }
         // Reset the "loading" state the moment ships actually show up.
         // Without this the spinner would spin forever — `isRestoring`
-        // is a local flag with no other reset path.
-        .onChange(of: store.ships.count) { _, newCount in
+        // is a local flag with no other reset path. Using the macOS
+        // 13-compatible single-arg form (iOS 17 / macOS 14 widened
+        // the API to include old/new tuple).
+        .onChange(of: store.ships.count) { newCount in
             if newCount > 0 {
                 isRestoring = false
             }
