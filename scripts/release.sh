@@ -385,12 +385,20 @@ XML
   # skipping the one whose sparkle:shortVersionString matches the
   # current $VERSION (so a re-run of the same tag doesn't duplicate).
   if [ -f "$PREV_APPCAST" ]; then
+    # Pull every <item>…</item> block from the previous appcast,
+    # skipping the one whose <sparkle:shortVersionString> matches
+    # the current $VERSION (so a re-run of the same tag doesn't
+    # duplicate). POSIX awk — BSD awk on macOS doesn't support
+    # GNU's 3-arg match(str, re, arr) capture syntax, so we
+    # extract the version with gsub instead.
     awk -v current="$VERSION" '
       /<item>/ { inside=1; buf=""; skip=0 }
       inside { buf = buf $0 "\n" }
       inside && /<sparkle:shortVersionString>/ {
-        match($0, /<sparkle:shortVersionString>([^<]+)<\/sparkle:shortVersionString>/, m)
-        if (m[1] == current) skip=1
+        line = $0
+        gsub(/.*<sparkle:shortVersionString>/, "", line)
+        gsub(/<\/sparkle:shortVersionString>.*/, "", line)
+        if (line == current) skip=1
       }
       /<\/item>/ { if (!skip) printf "%s", buf; inside=0 }
     ' "$PREV_APPCAST"
