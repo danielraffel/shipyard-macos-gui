@@ -66,8 +66,16 @@ done
 
 # ── version drift check ─────────────────────────────────────────────
 PROJECT_VERSION=$(awk '/MARKETING_VERSION/{print $2; exit}' project.yml | tr -d '"')
-if [ -z "$PROJECT_VERSION" ]; then
-  echo "ERROR: Could not read MARKETING_VERSION from project.yml" >&2
+# CURRENT_PROJECT_VERSION is the monotonic build number (CFBundleVersion
+# in the built app). Sparkle's default version comparator reads it off
+# the running app to decide whether an appcast entry is an upgrade, so
+# we MUST emit it into <sparkle:version>. Using the marketing string
+# there (e.g. "0.1.10") would lose against the stored build number
+# ("10") under Sparkle's numeric-segment comparator, and the user would
+# never get offered the update.
+BUILD_NUMBER=$(awk '/CURRENT_PROJECT_VERSION/{print $2; exit}' project.yml | tr -d '"')
+if [ -z "$PROJECT_VERSION" ] || [ -z "$BUILD_NUMBER" ]; then
+  echo "ERROR: Could not read MARKETING_VERSION or CURRENT_PROJECT_VERSION from project.yml" >&2
   exit 1
 fi
 if [ "$PROJECT_VERSION" != "$VERSION" ]; then
@@ -315,7 +323,7 @@ NEW_ITEM=$(cat <<XML
     <item>
       <title>Shipyard $VERSION</title>
       <pubDate>$PUB_DATE</pubDate>
-      <sparkle:version>$PROJECT_VERSION</sparkle:version>
+      <sparkle:version>$BUILD_NUMBER</sparkle:version>
       <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
       <sparkle:releaseNotesLink>$RELEASE_HTML_URL</sparkle:releaseNotesLink>
