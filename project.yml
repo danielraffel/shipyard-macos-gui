@@ -8,8 +8,8 @@ options:
   groupSortPosition: top
 settings:
   base:
-    MARKETING_VERSION: 0.1.4
-    CURRENT_PROJECT_VERSION: 5
+    MARKETING_VERSION: 0.1.5
+    CURRENT_PROJECT_VERSION: 6
     SWIFT_VERSION: "5.10"
     DEVELOPMENT_TEAM: 95CX6P84C4
     CODE_SIGN_STYLE: Manual
@@ -46,9 +46,14 @@ targets:
     deploymentTarget: "13.0"
     sources:
       - path: Sources/ShipyardMenuBar
-    resources:
+      # The asset catalog lives under sources (not resources) so
+      # xcodegen emits it with the right type (folder.assetcatalog)
+      # and Xcode runs actool to compile it into Assets.car. Listing
+      # it under `resources` made Xcode treat it as a plain folder
+      # and skip the compile step — the built app shipped with no
+      # Assets.car and the Dock/Finder fell back to the default
+      # generic icon.
       - path: Resources/Assets.xcassets
-        optional: true
     info:
       path: Resources/Info.plist
       properties:
@@ -58,6 +63,12 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundlePackageType: APPL
+        # Modern macOS reads CFBundleIconName and looks up "AppIcon"
+        # from the compiled Assets.car. CFBundleIconFile is the
+        # legacy fallback some contexts still honor (Dock caches,
+        # older Finder). Having both is the safe belt-and-suspenders.
+        CFBundleIconName: AppIcon
+        CFBundleIconFile: AppIcon
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSUIElement: true
         NSHumanReadableCopyright: "© 2026 Daniel Raffel"
