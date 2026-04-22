@@ -57,15 +57,22 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Live · via Tailscale Funnel")
                         .font(.system(size: 11, weight: .medium))
-                    // TimelineView forces a re-render on a schedule so
-                    // the "last event 33 sec ago" string actually ticks
-                    // instead of freezing at its original value. Renders
-                    // inside the closure so `RelativeDateTimeFormatter`
-                    // can recompute against `Date()` each tick.
-                    TimelineView(.periodic(from: .now, by: 10)) { _ in
-                        Text(liveStatusDetail(lastEventAt: lastEventAt))
+                    // Tick every second so the "last event Ns ago"
+                    // string is a real counter, not a coarse 10s-bucket
+                    // jump. Prior version used `.periodic(by: 10)` +
+                    // `RelativeDateTimeFormatter(.short)`: the user saw
+                    // "38 sec." freeze for many seconds at a time, then
+                    // skip to "1 min." — it didn't look live at all,
+                    // which is exactly the opposite signal we want when
+                    // the whole purpose of this line is to show the
+                    // tunnel is healthy.
+                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                        Text(liveStatusDetail(
+                            lastEventAt: lastEventAt, now: ctx.date
+                        ))
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
                     // URL on its own line so the hostname doesn't get
                     // middle-truncated away.
@@ -118,16 +125,41 @@ struct SettingsView: View {
         return .secondary
     }
 
-    private func liveStatusDetail(lastEventAt: Date?) -> String {
+    private func liveStatusDetail(lastEventAt: Date?, now: Date = Date()) -> String {
         if let last = lastEventAt {
-            let f = RelativeDateTimeFormatter()
-            f.unitsStyle = .short
-            return "last event \(f.localizedString(for: last, relativeTo: Date()))"
+            return "last event \(formatAgeLive(since: last, now: now))"
         }
         // The tunnel is up + webhooks are registered — but we haven't
         // received a delivery since the app launched. Don't imply the
         // tunnel is broken; events only arrive when GitHub fires them.
         return "tunnel active · no events yet this session"
+    }
+
+    /// Hand-rolled age formatter that produces a real ticking counter.
+    /// `RelativeDateTimeFormatter(.short)` rounds to word-scale units
+    /// ("38 sec." → "1 min.") which defeats the purpose of a 1s tick.
+    /// Output shape:
+    ///   < 60s  → "3s ago"
+    ///   < 1h   → "2m 05s ago"
+    ///   < 24h  → "3h 04m ago"
+    ///   ≥ 24h  → "2d ago"
+    private func formatAgeLive(since: Date, now: Date) -> String {
+        let secs = max(0, Int(now.timeIntervalSince(since)))
+        if secs < 60 {
+            return "\(secs)s ago"
+        }
+        if secs < 3600 {
+            let m = secs / 60
+            let s = secs % 60
+            return String(format: "%dm %02ds ago", m, s)
+        }
+        if secs < 86_400 {
+            let h = secs / 3600
+            let m = (secs % 3600) / 60
+            return String(format: "%dh %02dm ago", h, m)
+        }
+        let days = secs / 86_400
+        return "\(days)d ago"
     }
 
     private var githubSection: some View {

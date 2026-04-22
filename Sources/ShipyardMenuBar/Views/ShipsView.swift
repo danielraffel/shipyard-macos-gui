@@ -273,26 +273,43 @@ struct ShipsView: View {
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            // On first launch the pipeline hasn't emitted a snapshot
-            // yet — showing the "No active PRs" copy during that
-            // window is a lie, so render a spinner instead.
+            // Three exclusive states — one and only one can render.
+            // The prior version had two sibling if/else blocks (spinner
+            // OR anchor / then one of three copy blocks), which let the
+            // "Loading PRs…" spinner coexist with the "No active PRs /
+            // Run shipyard pr" empty-state copy. A reader saw both at
+            // once and couldn't tell whether the app was still fetching
+            // or had finished with nothing.
             if !store.hasLoadedInitialShips && store.cliBinaryResolved != nil {
                 initialLoadingState
                     .transition(.opacity)
-                    .onAppear { /* just trigger animation */ }
-            } else {
-                Image(systemName: "anchor")
-                    .font(.system(size: 44, weight: .ultraLight))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 60)
-                    .transition(.opacity)
-            }
-            if store.hiddenStaleCount > 0 && store.cliBinaryResolved != nil {
-                hiddenStaleBlock
             } else if store.cliBinaryResolved == nil {
-                cliMissingBlock
+                VStack(spacing: 10) {
+                    Image(systemName: "anchor")
+                        .font(.system(size: 44, weight: .ultraLight))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 60)
+                    cliMissingBlock
+                }
+                .transition(.opacity)
+            } else if store.hiddenStaleCount > 0 {
+                VStack(spacing: 10) {
+                    Image(systemName: "anchor")
+                        .font(.system(size: 44, weight: .ultraLight))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 60)
+                    hiddenStaleBlock
+                }
+                .transition(.opacity)
             } else {
-                nothingInFlightBlock
+                VStack(spacing: 10) {
+                    Image(systemName: "anchor")
+                        .font(.system(size: 44, weight: .ultraLight))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 60)
+                    nothingInFlightBlock
+                }
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

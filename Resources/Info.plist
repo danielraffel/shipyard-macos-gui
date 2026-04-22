@@ -8,6 +8,10 @@
 	<string>Shipyard</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.danielraffel.shipyard.menubar</string>
 	<key>CFBundleInfoDictionaryVersion</key>
