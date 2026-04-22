@@ -512,8 +512,12 @@ struct ShipCardView: View {
             }()
             switch effective {
             case .passed:
+                // Intentionally *not* the merge arrow — reserve that
+                // icon for actually-merged PRs above. Open+green uses a
+                // plain check so reviewers can tell at a glance whether
+                // the PR has landed or is still awaiting merge.
                 label = "green"; color = ShipyardColors.green
-                icon = "arrow.trianglehead.merge"
+                icon = "checkmark.circle.fill"
             case .failed:
                 label = "failed"; color = ShipyardColors.red; icon = nil
             case .running:
