@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ServiceManagement
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -58,6 +59,21 @@ final class AppStore: ObservableObject {
     private var lastRawSnapshot: [Ship] = []
     @Published var groupByWorktree: Bool = UserDefaults.standard.bool(forKey: Keys.groupByWorktree) {
         didSet { UserDefaults.standard.set(groupByWorktree, forKey: Keys.groupByWorktree) }
+    }
+
+    /// When true, Shipyard.app relaunches automatically at login
+    /// (survives reboots). Backed by `SMAppService.mainApp` — the
+    /// macOS 13+ replacement for the retired LSSharedFileList API.
+    /// Default off: menu-bar apps that auto-launch without the user's
+    /// explicit opt-in feel like spyware. The didSet pushes the state
+    /// into the system login-items registry; `syncLaunchAtLoginFromSystem`
+    /// runs at startup to absorb any change the user made in System
+    /// Settings → General → Login Items without us knowing.
+    @Published var launchAtLogin: Bool = UserDefaults.standard.bool(forKey: Keys.launchAtLogin) {
+        didSet {
+            UserDefaults.standard.set(launchAtLogin, forKey: Keys.launchAtLogin)
+            applyLaunchAtLoginRegistration()
+        }
     }
 
     /// Opt-in: when true, any PR that's actively being worked on
@@ -569,6 +585,65 @@ final class AppStore: ObservableObject {
             await MainActor.run { self?.startTailscaleWatcher() }
         }
         startRateLimitPolling()
+        syncLaunchAtLoginFromSystem()
+    }
+
+    /// Reconcile the stored `launchAtLogin` preference with the OS's
+    /// view. The user can flip the switch in System Settings →
+    /// General → Login Items at any time; we want the Settings toggle
+    /// in Shipyard to reflect that truth on launch. No registration
+    /// mutation happens here — we read state only.
+    private func syncLaunchAtLoginFromSystem() {
+        let enabled = (SMAppService.mainApp.status == .enabled)
+        if enabled != launchAtLogin {
+            // Bypass the didSet (which would call register/unregister
+            // redundantly) by setting the backing UserDefault and
+            // publishing the new value.
+            UserDefaults.standard.set(enabled, forKey: Keys.launchAtLogin)
+            launchAtLoginSuppressDidSet = true
+            launchAtLogin = enabled
+            launchAtLoginSuppressDidSet = false
+        }
+    }
+
+    /// Apply the current `launchAtLogin` preference to the system
+    /// login-items registry. Failures are surfaced via `cliBinaryError`
+    /// so the Settings row can show a one-line warning without a modal.
+    private func applyLaunchAtLoginRegistration() {
+        if launchAtLoginSuppressDidSet { return }
+        do {
+            let service = SMAppService.mainApp
+            if launchAtLogin {
+                if service.status != .enabled {
+                    try service.register()
+                }
+            } else {
+                if service.status == .enabled {
+                    try service.unregister()
+                }
+            }
+        } catch {
+            // Registration can fail if the user has previously denied
+            // the request (status becomes `.requiresApproval`). We
+            // leave the published toggle in the user-chosen state so
+            // they can see what they asked for; the Settings view
+            // renders a hint pointing at System Settings when the
+            // system status drifts from the toggle.
+            NSLog("Shipyard: launchAtLogin mutation failed: %@",
+                  error.localizedDescription)
+        }
+    }
+
+    /// Guard that stops the `launchAtLogin.didSet` from trying to
+    /// re-register when we're just absorbing a system-side change on
+    /// launch. Not @Published — purely internal bookkeeping.
+    private var launchAtLoginSuppressDidSet: Bool = false
+
+    /// OS-level truth for the login-item registration. The Settings
+    /// view surfaces this alongside the toggle so the user can see if
+    /// macOS has declined / requires approval / is enabled.
+    var launchAtLoginSystemStatus: SMAppService.Status {
+        SMAppService.mainApp.status
     }
 
     func dismiss(ship: Ship) {
@@ -1260,6 +1335,7 @@ final class AppStore: ObservableObject {
         static let otherActionsExpanded = "otherActionsExpanded"
         static let liveUpdateMode = "liveUpdateMode"
         static let autoExpandActivePRs = "autoExpandActivePRs"
+        static let launchAtLogin = "launchAtLogin"
     }
 
     /// Cancel or rerun a GitHub Actions run via `gh run …`. Both are
