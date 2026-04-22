@@ -233,26 +233,249 @@ private final class Session {
     }
 
     private func ensureDaemonRunning() async {
+        // Tri-state probe: healthy (skip), absent (spawn), hung
+        // (kill-and-spawn). The hung case is the one that used to
+        // silently drop us to polling for ~30s until connectSocket's
+        // retries gave up; now we detect it up front and recover.
+        switch probeDaemon() {
+        case .healthy:
+            return
+        case .absent:
+            await spawnDaemon()
+        case .hung(let pid):
+            await recoverHungDaemon(pid: pid)
+            await spawnDaemon()
+        }
+    }
+
+    /// Spawn a fresh daemon. Treats "already running" as success
+    /// because a race with another reconcile / manual `daemon start`
+    /// can legitimately find one already up between our probe and
+    /// this spawn.
+    private func spawnDaemon() async {
         var args = ["daemon", "start"]
         for repo in repos {
             args.append("--repo")
             args.append(repo)
         }
         let (exitCode, output) = await runShipyard(args: args, timeout: 8)
+        if exitCode == 0 {
+            return
+        }
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased().contains("already running") {
+            return
+        }
         // Shipyard CLI 0.22.4+ returns a non-zero exit when the child
         // daemon dies inside the verification window (e.g. PyInstaller
         // bundle missing encodings.idna). Older CLIs exit 0 here even
         // on failure; in that case we silently proceed and let the
         // socket-connect retry loop surface the actual problem.
-        if exitCode != 0 {
-            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            let detail = trimmed.isEmpty
-                ? "shipyard daemon start exited \(exitCode)"
-                : trimmed
-            // Route through the existing disconnect path so the Settings
-            // banner flips from "Live" to "polling — daemon exited: …".
-            onDisconnect?(detail)
+        let detail = trimmed.isEmpty
+            ? "shipyard daemon start exited \(exitCode)"
+            : trimmed
+        onDisconnect?(detail)
+    }
+
+    /// The daemon's accept loop is stuck (pid alive, socket present,
+    /// no hello). Try graceful shutdown first; if that doesn't clear
+    /// the socket inside a short window, SIGTERM the pid; finally
+    /// SIGKILL if still around. Clean up the stale pid/socket files
+    /// so the next spawn's `_acquire_lock` path doesn't misdiagnose
+    /// the situation.
+    private func recoverHungDaemon(pid: pid_t) async {
+        // Step 1: `shipyard daemon stop` does the polite shutdown
+        // via the IPC socket. Short timeout — if the daemon's
+        // accept loop is stuck this call will time out, which is
+        // fine; we escalate below.
+        _ = await runShipyard(args: ["daemon", "stop"], timeout: 2)
+
+        // Brief wait for clean exit, then check.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        if !Self.pidAlive(pid) { cleanupStaleDaemonFiles(); return }
+
+        // Step 2: SIGTERM.
+        _ = kill(pid, SIGTERM)
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        if !Self.pidAlive(pid) { cleanupStaleDaemonFiles(); return }
+
+        // Step 3: SIGKILL — last resort.
+        _ = kill(pid, SIGKILL)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        cleanupStaleDaemonFiles()
+    }
+
+    /// Remove stale daemon.pid + daemon.sock so the next spawn
+    /// doesn't have to rely on its own stale-file detection. Best
+    /// effort — any failure here isn't fatal; the spawned daemon
+    /// will overwrite these on its own startup.
+    private func cleanupStaleDaemonFiles() {
+        let base = (NSHomeDirectory() as NSString).appendingPathComponent(
+            "Library/Application Support/shipyard/daemon"
+        )
+        for name in ["daemon.pid", "daemon.sock"] {
+            let p = (base as NSString).appendingPathComponent(name)
+            try? FileManager.default.removeItem(atPath: p)
         }
+    }
+
+    nonisolated private static func pidAlive(_ pid: pid_t) -> Bool {
+        // kill(pid, 0) returns 0 if the process exists and we have
+        // permission to signal it. ESRCH → gone. Anything else →
+        // treat as alive (safer than the alternative).
+        kill(pid, 0) == 0
+    }
+
+    /// Daemon health outcomes the probe can report.
+    ///
+    /// - `healthy`: socket accepts + daemon delivered a hello frame.
+    ///   No further action needed.
+    /// - `hung(pid)`: either the pid file names a live process but
+    ///   the socket is dead (socket file removed / accept broken),
+    ///   or the socket accepts but never sends hello within the
+    ///   deadline. The caller should kill pid + cleanup files
+    ///   before spawning fresh.
+    /// - `absent`: nothing to clean up; just spawn.
+    private enum DaemonProbeResult {
+        case healthy
+        case hung(pid_t)
+        case absent
+    }
+
+    /// Three-step probe, each step bounded by a short timeout so a
+    /// sick daemon can't hang the GUI:
+    ///
+    ///   1. non-blocking `connect()` with a 500 ms deadline — catches
+    ///      orphan sockets that accept TCP but whose accept loop is
+    ///      hung.
+    ///   2. after connect succeeds, wait up to 500 ms for the
+    ///      daemon's `hello` frame. Every live daemon sends one
+    ///      immediately on accept; a hung daemon sitting in a stuck
+    ///      accept callback never writes it. No hello → hung.
+    ///   3. parse-check the reply for the literal `"hello"` token,
+    ///      so we don't confuse the probe with a goodbye-frame
+    ///      shutdown race.
+    ///
+    /// Total worst-case cost: ~1 second before we give up and return
+    /// hung/absent. On a healthy daemon it's a sub-millisecond local
+    /// round-trip. Cheap enough to run every reconcile.
+    private func probeDaemon() -> DaemonProbeResult {
+        let socketPath = DaemonClient.socketPath()
+        let socketExists = FileManager.default.fileExists(atPath: socketPath)
+        let pid = Self.readDaemonPidFile()
+
+        // Socket missing AND no live pid → truly absent.
+        if !socketExists {
+            if let p = pid, Self.pidAlive(p) {
+                // pid file points at a live process but the socket
+                // file is gone. The daemon process is present but
+                // not serving IPC — hung from the GUI's POV.
+                return .hung(p)
+            }
+            return .absent
+        }
+        // Run the socket probe. If it succeeds, healthy. If not,
+        // cross-reference the pid file: if a daemon process is
+        // still alive but unresponsive, hung — kill it. If no pid
+        // owner, absent — safe to spawn fresh.
+        if isSocketResponsive(path: socketPath) {
+            return .healthy
+        }
+        if let p = pid, Self.pidAlive(p) {
+            return .hung(p)
+        }
+        return .absent
+    }
+
+    nonisolated private static func readDaemonPidFile() -> pid_t? {
+        let path = (NSHomeDirectory() as NSString).appendingPathComponent(
+            "Library/Application Support/shipyard/daemon/daemon.pid"
+        )
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8),
+              let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+              pid > 0
+        else { return nil }
+        return pid
+    }
+
+    /// Low-level: open the socket, wait for the hello frame within
+    /// 500 ms, close. Returns true only if the daemon is actively
+    /// serving IPC right now.
+    private func isSocketResponsive(path: String) -> Bool {
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { Darwin.close(fd) }
+
+        // Non-blocking mode so `connect()` doesn't hang forever
+        // against a kernel-level accept stall.
+        let flags = Darwin.fcntl(fd, F_GETFL, 0)
+        guard flags >= 0,
+              Darwin.fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0
+        else { return false }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(path.utf8)
+        let maxLen = MemoryLayout.size(ofValue: addr.sun_path) - 1
+        guard pathBytes.count <= maxLen else { return false }
+        _ = withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            ptr.withMemoryRebound(to: CChar.self, capacity: maxLen + 1) { cStr in
+                for (i, byte) in pathBytes.enumerated() {
+                    cStr[i] = CChar(bitPattern: byte)
+                }
+                cStr[pathBytes.count] = 0
+            }
+        }
+        let addrLen = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let connectResult = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                Darwin.connect(fd, sa, addrLen)
+            }
+        }
+
+        // In non-blocking mode, `connect()` returns -1 with
+        // `errno == EINPROGRESS` when the connect is still pending;
+        // `0` means it completed immediately (local socket usually).
+        // Anything else (ECONNREFUSED, ENOENT) means no live listener.
+        if connectResult != 0 {
+            let err = errno
+            if err != EINPROGRESS {
+                return false
+            }
+            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            let ready = Darwin.poll(&pfd, 1, 500)
+            if ready <= 0 { return false }  // timeout or error
+            // connect() can complete "OK" at the syscall level but
+            // still carry a deferred error; SO_ERROR is the
+            // authoritative post-connect check.
+            var sockErr: Int32 = 0
+            var errLen = socklen_t(MemoryLayout<Int32>.size)
+            if getsockopt(fd, SOL_SOCKET, SO_ERROR, &sockErr, &errLen) != 0 {
+                return false
+            }
+            if sockErr != 0 { return false }
+        }
+
+        // Wait for the hello frame — the real liveness signal.
+        // IPCServer.handle_client enqueues the hello before reading
+        // any client input, so a responsive daemon lands data here
+        // within a few hundred microseconds. A hung accept callback
+        // never gets past this poll.
+        var pollFd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        if Darwin.poll(&pollFd, 1, 500) <= 0 { return false }
+
+        var buf = [UInt8](repeating: 0, count: 1024)
+        let n = buf.withUnsafeMutableBufferPointer {
+            Darwin.read(fd, $0.baseAddress, $0.count)
+        }
+        if n <= 0 { return false }
+        let data = Data(bytes: buf, count: n)
+        guard let str = String(data: data, encoding: .utf8) else { return false }
+        // Guard against a goodbye-frame race (daemon shutting down
+        // replied "goodbye" to a stale subscriber on our shared
+        // socket before hello). Only accept the explicit hello.
+        return str.contains("\"hello\"")
     }
 
     private func connectSocket() async {
