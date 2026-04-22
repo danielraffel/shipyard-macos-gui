@@ -52,6 +52,18 @@ enum ShipStateListPoller {
 }
 
 /// Runs `binary args...`, waits for exit, returns stdout as a String.
+///
+/// Critical: stdout is drained BEFORE `waitUntilExit()`. The previous
+/// order (run → waitUntilExit → readDataToEndOfFile) deadlocked on
+/// any subprocess that writes more than ~64KB to stdout — the
+/// subprocess blocks writing into a full pipe buffer while the parent
+/// blocks in `waitUntilExit`, and neither side makes progress. The
+/// `shipyard --json ship-state list` output crosses 64KB on any
+/// reasonably-sized state directory, so the poller hung silently for
+/// anyone with a history of tracked PRs. `readDataToEndOfFile` reads
+/// continuously as the subprocess writes; when the subprocess exits
+/// and closes its end of the pipe, the read returns EOF and we reap
+/// the process with an already-terminated `waitUntilExit`.
 func runShipyardCapturingStdout(binary: String, args: [String]) async -> String {
     await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
         DispatchQueue.global(qos: .userInitiated).async {
@@ -63,12 +75,13 @@ func runShipyardCapturingStdout(binary: String, args: [String]) async -> String 
             process.standardError = Pipe()
             do {
                 try process.run()
-                process.waitUntilExit()
             } catch {
                 cont.resume(returning: "")
                 return
             }
+            // Drain first, then reap. Order matters — see docstring.
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
             cont.resume(returning: String(data: data, encoding: .utf8) ?? "")
         }
     }
