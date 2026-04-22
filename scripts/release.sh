@@ -340,16 +340,18 @@ XML
   echo '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
   echo '  <channel>'
   echo '    <title>Shipyard</title>'
-  # Sparkle's "Version History" button in the update dialog opens
-  # this URL. Pointing it at the GitHub /releases list (plural)
-  # gives the user a human-readable history page with every
-  # version's notes. Before: we linked the repo root, so clicking
-  # "Version History" effectively dropped them into README.md with
-  # no release context. Worse, some clients were downloading the
-  # channel XML itself when the URL didn't render as HTML.
   echo '    <link>https://github.com/'"$REPO"'/releases</link>'
   echo '    <description>Menu-bar companion for the Shipyard CI CLI.</description>'
   echo '    <language>en</language>'
+  # Sparkle's "Version History" button (on both the update-
+  # available and the you're-already-current dialogs) opens
+  # <sparkle:fullReleaseNotesLink> when it's present at the
+  # channel level. Absent that element, Sparkle falls back to
+  # SUFeedURL, which is the raw appcast XML — and the browser
+  # just downloads it. Point at the GitHub /releases list so
+  # users land on a human-readable history of every version's
+  # notes.
+  echo '    <sparkle:fullReleaseNotesLink>https://github.com/'"$REPO"'/releases</sparkle:fullReleaseNotesLink>'
   echo "$NEW_ITEM"
   # Append every prior <item> block from the previous appcast. Not
   # a full XML parse — `awk` pulls each <item>…</item> block as-is,
