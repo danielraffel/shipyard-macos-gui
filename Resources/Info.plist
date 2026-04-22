@@ -38,5 +38,13 @@
 	<false/>
 	<key>NSSupportsSuddenTermination</key>
 	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/danielraffel/shipyard-macos-gui/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>A/1JcspAs19gjff6/VQabIVYG5UQgHa/bvXCKqzxI9U=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

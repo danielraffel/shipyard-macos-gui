@@ -26,6 +26,22 @@ struct SettingsView: View {
             Text(launchAtLoginFootnote)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
+            Divider().padding(.vertical, 2)
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Updates")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("Shipyard checks for new versions daily and notifies you here.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Check for Updates…") {
+                    store.autoUpdate?.checkForUpdates()
+                }
+                .disabled(store.autoUpdate == nil)
+                .help("Ask Sparkle to check the appcast feed now. Shows a dialog either way — update available or already current.")
+            }
         }
     }
 

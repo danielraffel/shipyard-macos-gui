@@ -6,10 +6,18 @@ options:
     macOS: "13.0"
   xcodeVersion: "26.0"
   groupSortPosition: top
+packages:
+  # Sparkle 2.x for built-in auto-update. Verifies with EdDSA
+  # signatures (Sparkle 1 DSA is gone in 2.x). Integrates via SPM.
+  # Pinning to a minor-version range so a 2.x → 3.x rewrite doesn't
+  # silently break our appcast format.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.6.0"
 settings:
   base:
-    MARKETING_VERSION: 0.1.8
-    CURRENT_PROJECT_VERSION: 9
+    MARKETING_VERSION: 0.1.9
+    CURRENT_PROJECT_VERSION: 10
     SWIFT_VERSION: "5.10"
     DEVELOPMENT_TEAM: 95CX6P84C4
     CODE_SIGN_STYLE: Manual
@@ -44,6 +52,8 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: "13.0"
+    dependencies:
+      - package: Sparkle
     sources:
       - path: Sources/ShipyardMenuBar
       # The asset catalog lives under sources (not resources) so
@@ -76,6 +86,25 @@ targets:
         NSHighResolutionCapable: true
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
+        # Sparkle auto-update. Feed URL uses GitHub's stable
+        # `/latest/download/<asset>` redirect so every release
+        # automatically becomes the "latest" one users resolve — no
+        # DNS or CDN in the middle. SUPublicEDKey is the EdDSA
+        # public half of the keypair; the private half lives at
+        # `~/.config/shipyard-macos-gui-sparkle.key` (git-ignored)
+        # and is read only by scripts/release.sh to sign each DMG
+        # with `sign_update`. Sparkle refuses to install any update
+        # whose signature doesn't verify against this key.
+        SUFeedURL: https://github.com/danielraffel/shipyard-macos-gui/releases/latest/download/appcast.xml
+        # EdDSA public key. Corresponds to the private key stored in
+        # the user's macOS Keychain under "https://sparkle-project.org"
+        # account "ed25519". Run `generate_keys` (Sparkle tool in the
+        # SPM artifacts dir) to regenerate / print.
+        SUPublicEDKey: A/1JcspAs19gjff6/VQabIVYG5UQgHa/bvXCKqzxI9U=
+        # Check automatically once per day; user can also pick
+        # "Check for Updates…" from the status-item menu on demand.
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 86400
     entitlements:
       path: Resources/ShipyardMenuBar.entitlements
       properties:
