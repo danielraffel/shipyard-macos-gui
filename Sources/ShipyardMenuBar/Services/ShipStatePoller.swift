@@ -34,7 +34,25 @@ private struct ShipStateListEnvelope: Decodable {
 }
 
 enum ShipStateListPoller {
+    /// Fetch the ship-state list, preferring the daemon IPC socket
+    /// when it's available. Falls back to the CLI subprocess path.
+    ///
+    /// Rationale: every `shipyard --json ship-state list` subprocess
+    /// spawn costs ~5-6s on cold start (PyInstaller onefile extract).
+    /// The daemon serves the identical JSON directly from its in-
+    /// process ShipStateStore in milliseconds. When the daemon is up
+    /// we always prefer that path; if it's unreachable (user disabled
+    /// live mode, socket bind race, etc.) we fall back to subprocess.
+    /// The poller stays a single function so callers don't need to
+    /// know which transport produced the result.
+    ///
+    /// Tracking: shipyard#153.
     static func fetch(binary: String) async -> [ShipStateListEntry]? {
+        // Fast path: daemon IPC. Returns nil on any transport problem
+        // so we transparently fall through to the subprocess.
+        if let entries = await fetchViaDaemon() {
+            return entries
+        }
         let raw = await runShipyardCapturingStdout(
             binary: binary,
             args: ["--json", "ship-state", "list"]
@@ -49,7 +67,74 @@ enum ShipStateListPoller {
         }
         return nil
     }
+
+    /// One-shot request/reply against the daemon's Unix socket.
+    /// Keeps its own transient connection so we don't interfere with
+    /// the long-lived event subscription DaemonClient already owns.
+    ///
+    /// The daemon hello frame is consumed, then we send
+    /// `{"type":"ship-state-list"}` and read until we see the
+    /// matching reply. Returns nil if the socket isn't listening,
+    /// the reply arrives malformed, or the daemon build is older
+    /// than shipyard v0.25.0 and doesn't know this message type.
+    private static func fetchViaDaemon() async -> [ShipStateListEntry]? {
+        let path = DaemonClient.socketPath()
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        return await withCheckedContinuation {
+            (cont: CheckedContinuation<[ShipStateListEntry]?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let conn = DaemonConnection.open(path: path) else {
+                    cont.resume(returning: nil); return
+                }
+                defer { conn.close() }
+
+                // Consume hello line; bail if nothing arrives.
+                _ = conn.readLine()
+
+                conn.sendLine(#"{"type":"ship-state-list"}"#)
+
+                // Pull lines until we see the reply, a goodbye, or the
+                // socket closes. Ignore any interleaved `event` frames
+                // (the daemon may replay ring-buffer events to
+                // pre-existing subscribers; we're a fresh socket and
+                // didn't subscribe, so this is just defensive).
+                let deadline = Date().addingTimeInterval(3.0)
+                while Date() < deadline {
+                    guard let line = conn.readLine(),
+                          let data = line.data(using: .utf8),
+                          let obj = try? JSONSerialization.jsonObject(with: data)
+                                as? [String: Any]
+                    else {
+                        cont.resume(returning: nil); return
+                    }
+                    let type = obj["type"] as? String
+                    if type == "ship-state-list" {
+                        guard let states = obj["states"] as? [Any] else {
+                            cont.resume(returning: []); return
+                        }
+                        // Re-encode the states array so JSONDecoder can
+                        // produce the same ShipStateListEntry objects
+                        // the CLI path yields.
+                        guard
+                            let buf = try? JSONSerialization.data(withJSONObject: states),
+                            let entries = try? JSONDecoder.shipyard
+                                .decode([ShipStateListEntry].self, from: buf)
+                        else {
+                            cont.resume(returning: nil); return
+                        }
+                        cont.resume(returning: entries); return
+                    }
+                    if type == "goodbye" {
+                        cont.resume(returning: nil); return
+                    }
+                    // status / event / hello replays — keep reading.
+                }
+                cont.resume(returning: nil)
+            }
+        }
+    }
 }
+
 
 /// Runs `binary args...`, waits for exit, returns stdout as a String.
 ///
@@ -98,6 +183,8 @@ extension Ship {
             branch: entry.branch ?? "",
             worktree: "",
             headSha: entry.headSha ?? "",
+            prTitle: entry.prTitle ?? "",
+            commitSubject: entry.commitSubject ?? "",
             targets: [],
             autoMerge: false,
             dismissed: false,

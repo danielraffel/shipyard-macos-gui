@@ -82,6 +82,15 @@ struct Ship: Identifiable, Codable, Equatable {
     var branch: String
     var worktree: String
     var headSha: String = ""
+    /// PR title from github.com, captured by shipyard at open time.
+    /// Surfaced in tooltips so hovering a truncated branch/PR cell
+    /// reveals the full human-readable title without taking space in
+    /// the card header.
+    var prTitle: String = ""
+    /// Commit subject from HEAD at ship time. Back-up when prTitle
+    /// isn't populated (older ship-state entries) — the two are
+    /// usually the same post-v0.22.9.
+    var commitSubject: String = ""
     var targets: [Target] = []
     var autoMerge: Bool = false
     var dismissed: Bool = false

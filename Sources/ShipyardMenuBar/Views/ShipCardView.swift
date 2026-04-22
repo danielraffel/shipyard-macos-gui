@@ -346,7 +346,7 @@ struct ShipCardView: View {
                         .foregroundStyle(.blue)
                 }
                 .onTapGesture { /* absorbs the tap, preventing header toggle */ }
-                .help("Open PR #\(ship.prNumber) on GitHub")
+                .help(prLinkTooltip(for: ship))
                 .layoutPriority(3)
 
                 if !ship.branch.isEmpty {
@@ -556,17 +556,43 @@ struct ShipCardView: View {
             ?? URL(string: "https://github.com")!
     }
 
-    /// Full-fidelity text for tooltip on header fields. We build one
-    /// tooltip that covers repo + branch + worktree so hovering any of
+    /// Full-fidelity text for tooltip on header fields. One tooltip
+    /// covers repo + branch + worktree + PR title so hovering any of
     /// them gives the complete context.
     private func tooltip(for ship: Ship) -> String {
         var lines: [String] = []
+        if let title = bestTitle(for: ship) {
+            lines.append(title)
+            lines.append("")  // blank separator before metadata block
+        }
         if !ship.repo.isEmpty { lines.append("Repo: \(ship.repo)") }
         lines.append("PR: #\(ship.prNumber)")
         if !ship.branch.isEmpty { lines.append("Branch: \(ship.branch)") }
         if !ship.worktree.isEmpty { lines.append("Worktree: \(ship.worktree)") }
         if !ship.headSha.isEmpty { lines.append("HEAD: \(String(ship.headSha.prefix(12)))") }
         return lines.joined(separator: "\n")
+    }
+
+    /// Prefer the PR title when shipyard captured one; fall back to
+    /// the commit subject (older ship-states) or nil when neither
+    /// is available.
+    private func bestTitle(for ship: Ship) -> String? {
+        if !ship.prTitle.isEmpty { return ship.prTitle }
+        if !ship.commitSubject.isEmpty { return ship.commitSubject }
+        return nil
+    }
+
+    /// Tooltip for the clickable #N link: lead with the PR title when
+    /// we have one so hovering a truncated header row reveals the
+    /// full title (user complaint on v0.1.6 — `feature/cl…-coverage`
+    /// was unreadable and the tooltip only said "Open PR #N on
+    /// GitHub"). Still mentions the open-GitHub action so the click
+    /// affordance is clear.
+    private func prLinkTooltip(for ship: Ship) -> String {
+        if let title = bestTitle(for: ship) {
+            return "\(title)\n\nOpen PR #\(ship.prNumber) on GitHub"
+        }
+        return "Open PR #\(ship.prNumber) on GitHub"
     }
 
     private func relative(_ date: Date) -> String {
