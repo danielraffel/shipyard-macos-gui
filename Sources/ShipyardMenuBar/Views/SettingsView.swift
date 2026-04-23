@@ -51,7 +51,7 @@ struct SettingsView: View {
         if store.launchAtLogin {
             switch store.launchAtLoginSystemStatus {
             case .enabled:
-                return "Shipyard will open automatically next time you log in."
+                return "Shipyard will open automatically after you restart your Mac."
             case .requiresApproval:
                 return "macOS needs your approval in System Settings → General → Login Items."
             case .notRegistered, .notFound:
