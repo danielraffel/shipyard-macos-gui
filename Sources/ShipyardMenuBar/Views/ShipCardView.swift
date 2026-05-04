@@ -341,7 +341,7 @@ struct ShipCardView: View {
                 // PR number is a separate link so users can still click
                 // through to GitHub without triggering the expand.
                 Link(destination: prURL) {
-                    Text("#\(ship.prNumber)")
+                    Text(verbatim: "#\(ship.prNumber)")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.blue)
                 }

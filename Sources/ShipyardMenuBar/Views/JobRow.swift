@@ -174,7 +174,7 @@ struct JobRetargetPicker: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.primary)
             }
-            Text("Will run: shipyard cloud retarget --pr \(ship.prNumber) --target \"\(effectiveTarget)\" --provider <P> --apply")
+            Text(verbatim: "Will run: shipyard cloud retarget --pr \(ship.prNumber) --target \"\(effectiveTarget)\" --provider <P> --apply")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
                 .lineLimit(2)

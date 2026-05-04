@@ -209,7 +209,7 @@ struct AddLaneView: View {
     private func confirmation(target: String, provider: RunnerProvider) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             header(title: "Add lane")
-            Text("Dispatch \(target) on \(provider.rawValue) for PR #\(ship.prNumber)?")
+            Text(verbatim: "Dispatch \(target) on \(provider.rawValue) for PR #\(ship.prNumber)?")
                 .font(.system(size: 11))
             HStack {
                 Button("Cancel") {
