@@ -1,5 +1,101 @@
 import Foundation
 
+struct DaemonRuntimePaths: Equatable {
+    let daemonDir: String
+    let socketPath: String
+    let pidFilePath: String
+
+    static func legacy() -> DaemonRuntimePaths {
+        let daemonDir = (NSHomeDirectory() as NSString).appendingPathComponent(
+            "Library/Application Support/shipyard/daemon"
+        )
+        return DaemonRuntimePaths(
+            daemonDir: daemonDir,
+            socketPath: (daemonDir as NSString).appendingPathComponent("daemon.sock"),
+            pidFilePath: (daemonDir as NSString).appendingPathComponent("daemon.pid")
+        )
+    }
+
+    static func decode(json text: String) -> DaemonRuntimePaths? {
+        guard let data = text.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let socket = obj["daemon_socket"] as? String,
+              let pid = obj["daemon_pid_file"] as? String
+        else { return nil }
+        let daemonDir = (obj["daemon_dir"] as? String)
+            ?? (socket as NSString).deletingLastPathComponent
+        return DaemonRuntimePaths(daemonDir: daemonDir, socketPath: socket, pidFilePath: pid)
+    }
+}
+
+private final class DaemonRuntimePathCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: DaemonRuntimePaths] = [:]
+
+    func value(for binary: String, resolve: () -> DaemonRuntimePaths) -> DaemonRuntimePaths {
+        lock.lock()
+        if let cached = values[binary] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let resolved = resolve()
+
+        lock.lock()
+        values[binary] = resolved
+        lock.unlock()
+        return resolved
+    }
+}
+
+enum DaemonRuntimePathResolver {
+    private static let cache = DaemonRuntimePathCache()
+
+    static func paths(for shipyardBinary: String) -> DaemonRuntimePaths {
+        cache.value(for: shipyardBinary) {
+            resolveUncached(shipyardBinary: shipyardBinary)
+        }
+    }
+
+    private static func resolveUncached(shipyardBinary: String) -> DaemonRuntimePaths {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shipyardBinary)
+        process.arguments = ["--json", "paths"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+        } catch {
+            return .legacy()
+        }
+        let group = DispatchGroup()
+        var data = Data()
+        var status: Int32 = -1
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            status = process.terminationStatus
+            group.leave()
+        }
+        guard group.wait(timeout: .now() + 1.5) == .success else {
+            if process.isRunning {
+                process.terminate()
+            }
+            return .legacy()
+        }
+        guard status == 0,
+              let text = String(data: data, encoding: .utf8),
+              let paths = DaemonRuntimePaths.decode(json: text)
+        else {
+            return .legacy()
+        }
+        return paths
+    }
+}
+
 /// Subscribes the GUI to the `shipyard daemon` subprocess for live
 /// webhook events.
 ///
@@ -190,9 +286,7 @@ final class DaemonClient {
     /// ship-state-list fetcher) can compute the path without hopping
     /// to the main actor just to read an env-derived string.
     nonisolated static func socketPath() -> String {
-        (NSHomeDirectory() as NSString).appendingPathComponent(
-            "Library/Application Support/shipyard/daemon/daemon.sock"
-        )
+        DaemonRuntimePaths.legacy().socketPath
     }
 }
 
@@ -206,12 +300,14 @@ private final class Session {
 
     private let shipyardBinary: String
     private let repos: Set<String>
+    private let runtimePaths: DaemonRuntimePaths
     private var readerTask: Task<Void, Never>?
     private var connection: DaemonConnection?
 
     init(shipyardBinary: String, repos: Set<String>) {
         self.shipyardBinary = shipyardBinary
         self.repos = repos
+        self.runtimePaths = DaemonRuntimePathResolver.paths(for: shipyardBinary)
     }
 
     func start() async {
@@ -310,11 +406,8 @@ private final class Session {
     /// effort — any failure here isn't fatal; the spawned daemon
     /// will overwrite these on its own startup.
     private func cleanupStaleDaemonFiles() {
-        let base = (NSHomeDirectory() as NSString).appendingPathComponent(
-            "Library/Application Support/shipyard/daemon"
-        )
         for name in ["daemon.pid", "daemon.sock"] {
-            let p = (base as NSString).appendingPathComponent(name)
+            let p = (runtimePaths.daemonDir as NSString).appendingPathComponent(name)
             try? FileManager.default.removeItem(atPath: p)
         }
     }
@@ -360,9 +453,9 @@ private final class Session {
     /// hung/absent. On a healthy daemon it's a sub-millisecond local
     /// round-trip. Cheap enough to run every reconcile.
     private func probeDaemon() -> DaemonProbeResult {
-        let socketPath = DaemonClient.socketPath()
+        let socketPath = runtimePaths.socketPath
         let socketExists = FileManager.default.fileExists(atPath: socketPath)
-        let pid = Self.readDaemonPidFile()
+        let pid = Self.readDaemonPidFile(path: runtimePaths.pidFilePath)
 
         // Socket missing AND no live pid → truly absent.
         if !socketExists {
@@ -387,10 +480,7 @@ private final class Session {
         return .absent
     }
 
-    nonisolated private static func readDaemonPidFile() -> pid_t? {
-        let path = (NSHomeDirectory() as NSString).appendingPathComponent(
-            "Library/Application Support/shipyard/daemon/daemon.pid"
-        )
+    nonisolated private static func readDaemonPidFile(path: String) -> pid_t? {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8),
               let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)),
               pid > 0
@@ -482,7 +572,7 @@ private final class Session {
         // Retry a few times — the daemon takes a moment to bind the
         // socket after we spawn it, especially on first run when
         // Tailscale Funnel + webhook registration are warming up.
-        let path = DaemonClient.socketPath()
+        let path = runtimePaths.socketPath
         var connected: DaemonConnection? = nil
         for attempt in 1...10 {
             if let c = DaemonConnection.open(path: path) {

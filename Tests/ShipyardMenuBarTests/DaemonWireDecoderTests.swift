@@ -121,7 +121,7 @@ final class DaemonWireDecoderTests: XCTestCase {
         XCTAssertEqual(status.registeredRepos, ["org/repo"])
     }
 
-    func test_decideHonorsAutoModeWithoutTailscale() {
+    func test_decideLetsDaemonOwnAutoModeTailscaleDiagnosis() {
         let notInstalled = TailscaleStatus(
             binaryPath: nil,
             backendState: nil,
@@ -129,8 +129,8 @@ final class DaemonWireDecoderTests: XCTestCase {
             funnelPermitted: false
         )
         let d = DaemonClient.decide(mode: .auto, tailscale: notInstalled)
-        XCTAssertFalse(d.attemptLive)
-        XCTAssertEqual(d.reason, .tailscaleNotInstalled)
+        XCTAssertTrue(d.attemptLive)
+        XCTAssertNil(d.reason)
     }
 
     func test_decideRefusesToAttemptWhenOff() {
@@ -143,5 +143,68 @@ final class DaemonWireDecoderTests: XCTestCase {
         let d = DaemonClient.decide(mode: .off, tailscale: ready)
         XCTAssertFalse(d.attemptLive)
         XCTAssertEqual(d.reason, .userDisabled)
+    }
+
+    func test_runtimePathsDecodeRustPathsOutput() {
+        let json = """
+        {
+          "mode": "isolated",
+          "daemon_dir": "/tmp/shipyard-rust-dev/daemon",
+          "daemon_socket": "/tmp/shipyard-rust-dev/daemon/daemon.sock",
+          "daemon_pid_file": "/tmp/shipyard-rust-dev/daemon/daemon.pid"
+        }
+        """
+        let paths = DaemonRuntimePaths.decode(json: json)
+        XCTAssertEqual(paths?.daemonDir, "/tmp/shipyard-rust-dev/daemon")
+        XCTAssertEqual(paths?.socketPath, "/tmp/shipyard-rust-dev/daemon/daemon.sock")
+        XCTAssertEqual(paths?.pidFilePath, "/tmp/shipyard-rust-dev/daemon/daemon.pid")
+    }
+
+    func test_runtimePathsDecodeFallsBackToSocketDirectoryWhenDaemonDirMissing() {
+        let json = """
+        {
+          "daemon_socket": "/tmp/shipyard-rust-dev/daemon/daemon.sock",
+          "daemon_pid_file": "/tmp/shipyard-rust-dev/daemon/daemon.pid"
+        }
+        """
+        let paths = DaemonRuntimePaths.decode(json: json)
+        XCTAssertEqual(paths?.daemonDir, "/tmp/shipyard-rust-dev/daemon")
+    }
+
+    func test_runtimePathResolverUsesSelectedCliPathsCommand() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fakeCLI = dir.appendingPathComponent("shipyard")
+        try """
+        #!/bin/sh
+        if [ "$1" = "--json" ] && [ "$2" = "paths" ]; then
+          cat <<'JSON'
+        {"daemon_dir":"/tmp/rust-daemon","daemon_socket":"/tmp/rust-daemon/daemon.sock","daemon_pid_file":"/tmp/rust-daemon/daemon.pid"}
+        JSON
+          exit 0
+        fi
+        exit 2
+        """.write(to: fakeCLI, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeCLI.path)
+
+        let paths = DaemonRuntimePathResolver.paths(for: fakeCLI.path)
+        XCTAssertEqual(paths.socketPath, "/tmp/rust-daemon/daemon.sock")
+        XCTAssertEqual(paths.pidFilePath, "/tmp/rust-daemon/daemon.pid")
+    }
+
+    func test_runtimePathResolverFallsBackForLegacyCliWithoutPathsCommand() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fakeCLI = dir.appendingPathComponent("shipyard")
+        try """
+        #!/bin/sh
+        exit 2
+        """.write(to: fakeCLI, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeCLI.path)
+
+        let paths = DaemonRuntimePathResolver.paths(for: fakeCLI.path)
+        XCTAssertEqual(paths, DaemonRuntimePaths.legacy())
     }
 }
