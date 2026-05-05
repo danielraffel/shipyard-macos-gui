@@ -50,7 +50,7 @@ enum ShipStateListPoller {
     static func fetch(binary: String) async -> [ShipStateListEntry]? {
         // Fast path: daemon IPC. Returns nil on any transport problem
         // so we transparently fall through to the subprocess.
-        if let entries = await fetchViaDaemon() {
+        if let entries = await fetchViaDaemon(binary: binary) {
             return entries
         }
         let raw = await runShipyardCapturingStdout(
@@ -77,8 +77,8 @@ enum ShipStateListPoller {
     /// matching reply. Returns nil if the socket isn't listening,
     /// the reply arrives malformed, or the daemon build is older
     /// than shipyard v0.25.0 and doesn't know this message type.
-    private static func fetchViaDaemon() async -> [ShipStateListEntry]? {
-        let path = DaemonClient.socketPath()
+    private static func fetchViaDaemon(binary: String) async -> [ShipStateListEntry]? {
+        let path = DaemonRuntimePathResolver.paths(for: binary).socketPath
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         return await withCheckedContinuation {
             (cont: CheckedContinuation<[ShipStateListEntry]?, Never>) in

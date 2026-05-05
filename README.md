@@ -50,7 +50,20 @@ edge directly to your Mac — no Shipyard-operated backend in between.
 
 Requires macOS 13 Ventura or later. Drag from the DMG into `/Applications` and launch. The app lives in the menu bar — no dock icon.
 
-Requires the `shipyard` CLI on your `PATH` (auto-discovered at `/usr/local/bin`, `/opt/homebrew/bin`, or `~/.pulp/bin`).
+Requires the `shipyard` CLI. The app uses the selected path from
+Settings when provided, otherwise it auto-discovers `/usr/local/bin`,
+`/opt/homebrew/bin`, `~/.pulp/bin`, then the canonical Rust install at
+`~/.local/bin/shipyard`.
+
+When the selected CLI supports `shipyard --json paths`, the app derives
+the daemon socket, pid file, and daemon directory from that CLI so
+side-by-side validation builds and production installs do not collide.
+Older CLIs fall back to the legacy
+`~/Library/Application Support/shipyard/daemon` socket.
+
+The Tailscale App Store build is supported for live mode; the app probes
+`/Applications/Tailscale.app/Contents/MacOS/Tailscale` before Homebrew
+or system PATH locations.
 
 ## Build locally
 
@@ -101,7 +114,9 @@ shipyard-macos-gui/
 │   ├── Services/
 │   │   ├── AppStore.swift          # central @MainActor state
 │   │   ├── StatusItemController.swift  # NSStatusItem + NSPopover
-│   │   └── ShipyardCLIRunner.swift # NDJSON subprocess actor
+│   │   ├── ShipStatePoller.swift   # ship-state list via daemon IPC/CLI
+│   │   ├── ShipyardCLIRunner.swift # NDJSON subprocess actor
+│   │   └── LiveMode/DaemonClient.swift # daemon IPC + live webhook bridge
 │   └── Views/                      # SwiftUI views
 ├── scripts/
 │   ├── bootstrap.sh                # xcodegen generate + signing check
