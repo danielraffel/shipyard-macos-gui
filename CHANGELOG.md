@@ -3,6 +3,12 @@
 All notable changes to shipyard-macos-gui are documented here. Each entry links
 to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/releases).
 
+<a id="v0113"></a>
+## [0.1.13] - 2026-05-05
+
+- Fix live-mode daemon startup so the GUI enables Tailscale Funnel for Shipyard CLI daemons and recovers from stale `inactive` daemons left by v0.1.12.
+- Bound daemon subprocesses and one-shot daemon IPC reads so launch cannot hang behind a stuck CLI process or non-responsive socket.
+
 <a id="v0112"></a>
 ## [0.1.12] - 2026-05-05
 
@@ -46,6 +52,7 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 - fix: spinner stuck + empty-state collision + last-event counter ticks ([#7](https://github.com/danielraffel/shipyard-macos-gui/pull/7))
 
+[0.1.13]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.13
 [0.1.12]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.12
 [0.1.11]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.11
 [0.1.10]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.10
