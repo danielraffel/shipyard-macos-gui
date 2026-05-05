@@ -309,7 +309,8 @@ final class AppStore: ObservableObject {
     /// Patch the cached `GitHubRun` in place from a workflow_run
     /// webhook payload. Zero `gh api` calls.
     private func mergeWebhookRun(_ p: WebhookEvent.WorkflowRunPayload) {
-        patchCachedRun(runId: p.runId, repo: p.repo, branch: p.headBranch) { old in
+        let now = Date()
+        let patched = patchCachedRun(runId: p.runId, repo: p.repo, branch: p.headBranch) { old in
             GitHubRun(
                 id: old.id,
                 repo: old.repo,
@@ -320,28 +321,105 @@ final class AppStore: ObservableObject {
                 conclusion: p.conclusion,
                 url: old.url,
                 createdAt: old.createdAt,
-                updatedAt: Date()
+                updatedAt: now
             )
         }
+        guard !patched else { return }
+        let run = GitHubRun(
+            id: p.runId,
+            repo: p.repo,
+            workflowName: p.workflowName,
+            headBranch: p.headBranch,
+            headSha: p.headSha,
+            status: p.status,
+            conclusion: p.conclusion,
+            url: p.htmlURL.flatMap(URL.init(string:)),
+            createdAt: now,
+            updatedAt: now
+        )
+        upsertCachedRun(run)
     }
 
     /// Patch the cached `GitHubJob` in place from a workflow_job
     /// webhook payload. Zero `gh api` calls.
     private func mergeWebhookJob(_ p: WebhookEvent.WorkflowJobPayload) {
-        guard var jobs = jobsByRunId[p.runId] else { return }
-        guard let idx = jobs.firstIndex(where: { $0.databaseId == p.jobId }) else {
-            return
+        var jobs = jobsByRunId[p.runId] ?? []
+        if let idx = jobs.firstIndex(where: { $0.databaseId == p.jobId }) {
+            let old = jobs[idx]
+            jobs[idx] = GitHubJob(
+                databaseId: old.databaseId,
+                name: old.name,
+                status: p.status,
+                conclusion: p.conclusion,
+                labels: p.labels.isEmpty ? old.labels : p.labels,
+                runnerName: p.runnerName ?? old.runnerName
+            )
+        } else {
+            jobs.append(GitHubJob(
+                databaseId: p.jobId,
+                name: p.name,
+                status: p.status,
+                conclusion: p.conclusion,
+                labels: p.labels.isEmpty ? nil : p.labels,
+                runnerName: p.runnerName
+            ))
         }
-        let old = jobs[idx]
-        jobs[idx] = GitHubJob(
-            databaseId: old.databaseId,
-            name: old.name,
-            status: p.status,
-            conclusion: p.conclusion,
-            labels: p.labels.isEmpty ? old.labels : p.labels,
-            runnerName: p.runnerName ?? old.runnerName
-        )
         jobsByRunId[p.runId] = jobs
+    }
+
+    private func upsertCachedRun(_ run: GitHubRun) {
+        var repoRuns = githubRunsByRepo[run.repo] ?? []
+        upsertCachedRun(run, in: &repoRuns)
+        githubRunsByRepo[run.repo] = repoRuns
+
+        let key = "\(run.repo)\t\(run.headBranch)"
+        var branchRuns = githubRunsByBranch[key] ?? []
+        upsertCachedRun(run, in: &branchRuns)
+        githubRunsByBranch[key] = branchRuns
+    }
+
+    private func upsertCachedRun(_ run: GitHubRun, in runs: inout [GitHubRun]) {
+        if let idx = runs.firstIndex(where: { $0.id == run.id }) {
+            runs[idx] = run
+        } else {
+            runs.append(run)
+            runs.sort { $0.createdAt > $1.createdAt }
+        }
+    }
+
+    private func updatedCachedRun(
+        _ runId: Int64,
+        repo: String,
+        branch: String,
+        transform: (GitHubRun) -> GitHubRun
+    ) -> Bool {
+        var changed = false
+        if var runs = githubRunsByRepo[repo],
+           let idx = runs.firstIndex(where: { $0.id == runId }) {
+            runs[idx] = transform(runs[idx])
+            githubRunsByRepo[repo] = runs
+            changed = true
+        }
+        let key = "\(repo)\t\(branch)"
+        if var runs = githubRunsByBranch[key],
+           let idx = runs.firstIndex(where: { $0.id == runId }) {
+            runs[idx] = transform(runs[idx])
+            githubRunsByBranch[key] = runs
+            changed = true
+        }
+        return changed
+    }
+
+    /// Rewrite the run matching `runId` in both caches (repo-wide +
+    /// branch-scoped) using the caller's transformer.
+    @discardableResult
+    private func patchCachedRun(
+        runId: Int64,
+        repo: String,
+        branch: String,
+        transform: (GitHubRun) -> GitHubRun
+    ) -> Bool {
+        updatedCachedRun(runId, repo: repo, branch: branch, transform: transform)
     }
 
     /// Build `PRState` directly from the pull_request webhook payload.
@@ -366,27 +444,6 @@ final class AppStore: ObservableObject {
             mergedAt: parse(p.mergedAt),
             closedAt: parse(p.closedAt)
         )
-    }
-
-    /// Rewrite the run matching `runId` in both caches (repo-wide +
-    /// branch-scoped) using the caller's transformer.
-    private func patchCachedRun(
-        runId: Int64,
-        repo: String,
-        branch: String,
-        transform: (GitHubRun) -> GitHubRun
-    ) {
-        if var runs = githubRunsByRepo[repo],
-           let idx = runs.firstIndex(where: { $0.id == runId }) {
-            runs[idx] = transform(runs[idx])
-            githubRunsByRepo[repo] = runs
-        }
-        let key = "\(repo)\t\(branch)"
-        if var runs = githubRunsByBranch[key],
-           let idx = runs.firstIndex(where: { $0.id == runId }) {
-            runs[idx] = transform(runs[idx])
-            githubRunsByBranch[key] = runs
-        }
     }
 
     @Published var showGitHubActions: Bool = UserDefaults.standard.object(forKey: Keys.showGitHubActions) as? Bool ?? true {
@@ -425,6 +482,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var namespaceDetailErrorsByInstanceID: [String: String] = [:]
     @Published private(set) var namespaceActivityUpdatedAt: Date?
     @Published private(set) var namespaceActivityError: String?
+    @Published private(set) var namespaceWorkspaceSlug: String?
 
     /// Latest REST rate-limit snapshot, polled every 2 min. Drives
     /// the exhaustion banner in ShipsView. `nil` until the first
@@ -469,9 +527,11 @@ final class AppStore: ObservableObject {
                 if Task.isCancelled { break }
                 await MainActor.run {
                     self?.namespaceInstances = snapshot.instances
+                    self?.namespaceWorkspaceSlug = snapshot.workspaceSlug ?? self?.namespaceWorkspaceSlug
                     self?.pruneNamespaceDetails(to: snapshot.instances)
                     self?.namespaceActivityError = snapshot.error
                     self?.namespaceActivityUpdatedAt = Date()
+                    self?.fetchJobsForNamespaceCandidates()
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
@@ -1553,6 +1613,56 @@ final class AppStore: ObservableObject {
 
     func visibleNamespaceInstances() -> [NamespaceInstance] {
         namespaceInstances.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func namespaceJobContext(for instance: NamespaceInstance) -> NamespaceInstanceJobContext? {
+        for run in allCachedGitHubRuns() {
+            guard let jobs = jobsByRunId[run.id] else { continue }
+            for job in jobs where job.namespaceInstanceID == instance.id {
+                return NamespaceInstanceJobContext(
+                    repo: run.repo,
+                    workflowName: run.workflowName,
+                    jobName: job.name,
+                    branch: run.headBranch,
+                    headSha: run.headSha,
+                    runID: run.id,
+                    jobID: job.databaseId,
+                    githubURL: URL(string: "https://github.com/\(run.repo)/actions/runs/\(run.id)/job/\(job.databaseId)"),
+                    namespaceURL: namespaceWorkspaceSlug.flatMap {
+                        URL(string: "https://cloud.namespace.so/\($0)/actions/job/\(job.databaseId)")
+                    }
+                )
+            }
+        }
+        return nil
+    }
+
+    func fetchJobsForNamespaceCandidates() {
+        guard deferredStartupWorkStarted, showGitHubActions else { return }
+        let instanceIDs = Set(namespaceInstances.map(\.id))
+        guard !instanceIDs.isEmpty else { return }
+
+        let candidateRuns = allCachedGitHubRuns()
+            .filter(\.isRunning)
+            .filter { run in
+                run.repo.isEmpty || namespaceInstances.contains(where: { $0.repo == run.repo })
+            }
+            .sorted { $0.createdAt > $1.createdAt }
+
+        for run in candidateRuns.prefix(max(8, instanceIDs.count * 2)) {
+            fetchJobsIfNeeded(for: run)
+        }
+    }
+
+    private func allCachedGitHubRuns() -> [GitHubRun] {
+        var seen: Set<Int64> = []
+        var runs: [GitHubRun] = []
+        for source in Array(githubRunsByRepo.values) + Array(githubRunsByBranch.values) {
+            for run in source where seen.insert(run.id).inserted {
+                runs.append(run)
+            }
+        }
+        return runs
     }
 
     /// When a ship has no dispatched_runs of its own but GitHub did

@@ -81,14 +81,19 @@ active `nsc list` instance in a separate infrastructure section.
 
 The row chrome intentionally follows Namespace Cloud's instance vocabulary only
 for fields returned by `nsc list`: active instance, ID, platform, and size. The
-GUI does not infer workflow names, "no job yet", or per-instance links because
-those fields are not exposed locally.
+GUI does not infer workflow names or "no job yet" because those fields are not
+exposed by `nsc list`. If an already-cached GitHub job reports
+`runner_name: nsc-runner-<instance-id>`, the GUI joins that job to the
+Namespace row and can derive the Namespace Cloud URL as
+`https://cloud.namespace.so/<workspace>/actions/job/<github-job-id>`. The
+workspace slug comes from `nsc workspace describe -o json`. This opportunistic
+join adds no `gh pr list` calls and no broad GitHub scans.
 
 Future Namespace UX depends on richer `nsc` or API fields:
 
 - GitHub run ID and job ID for exact dedupe and direct github.com links.
 - Runner assignment state so idle, queued, and busy instances render distinctly.
-- Per-instance web or log URLs for one-click drill-in from the menu bar.
+- Stable per-instance web or log URLs for one-click drill-in from the menu bar.
 - Lifecycle events so Namespace rows can update live instead of every 30 seconds.
 
 ## Binary discovery
@@ -139,6 +144,14 @@ The App Store Tailscale build is intentionally first because it may be present
 without a working `tailscale` PATH shim. In Auto/On live mode the daemon is
 still authoritative: if the GUI probe is uncertain, the GUI attempts daemon
 connection and surfaces the daemon's real failure reason.
+
+GitHub webhook registration is allowed to fail soft when the `gh` token lacks
+`admin:repo_hook`. That state is not a daemon crash: the GUI keeps polling,
+shows a hook-authorization warning, and exposes a copy button for:
+
+```bash
+gh auth refresh -h github.com -s admin:repo_hook
+```
 
 ## Sandbox + entitlements
 

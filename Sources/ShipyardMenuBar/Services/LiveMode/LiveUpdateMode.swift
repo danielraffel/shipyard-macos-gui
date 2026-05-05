@@ -67,7 +67,55 @@ enum LiveUpdateStatus: Equatable {
         /// bucket. Used for cases we can't attribute more cleanly.
         case serverStartFailed(String)
 
+        static let webhookScopeCommand = "gh auth refresh -h github.com -s admin:repo_hook"
+
+        var isWebhookScopeMissing: Bool {
+            switch self {
+            case .daemonUnavailable(let err),
+                 .tunnelStartFailed(let err),
+                 .serverStartFailed(let err):
+                let lower = err.lowercased()
+                return lower.contains("admin:repo_hook")
+                    || lower.contains("repo_hook")
+                    || lower.contains("webhook admin scope")
+            default:
+                return false
+            }
+        }
+
+        var shouldWarn: Bool {
+            if isWebhookScopeMissing { return true }
+            switch self {
+            case .userDisabled:
+                return false
+            default:
+                return true
+            }
+        }
+
+        var title: String {
+            if isWebhookScopeMissing {
+                return "Live webhook authorization needed"
+            }
+            switch self {
+            case .userDisabled:
+                return "Polling every 60s"
+            default:
+                return "Live updates unavailable — polling"
+            }
+        }
+
+        var headerLabel: String {
+            if isWebhookScopeMissing {
+                return "polling · hook auth"
+            }
+            return "polling"
+        }
+
         var userFacing: String {
+            if isWebhookScopeMissing {
+                return "GitHub webhook management needs one-time authorization. Polling continues; live webhooks will resume after granting the scope."
+            }
             switch self {
             case .userDisabled:
                 return "Live updates disabled."

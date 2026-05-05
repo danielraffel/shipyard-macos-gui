@@ -71,19 +71,20 @@ private struct NamespaceInstanceRow: View {
     @State private var expanded: Bool = false
 
     var body: some View {
+        let jobContext = store.namespaceJobContext(for: instance)
         VStack(alignment: .leading, spacing: 4) {
             Button {
                 expanded.toggle()
-                if expanded {
+                if expanded && jobContext == nil {
                     store.fetchNamespaceDetailIfNeeded(for: instance)
                 }
             } label: {
-                summaryRow
+                summaryRow(jobContext: jobContext)
             }
             .buttonStyle(.plain)
 
             if expanded {
-                detailPanel
+                detailPanel(jobContext: jobContext)
                     .padding(.leading, 24)
                     .padding(.trailing, 4)
                     .padding(.bottom, 4)
@@ -94,7 +95,7 @@ private struct NamespaceInstanceRow: View {
         .help(helpText)
     }
 
-    private var summaryRow: some View {
+    private func summaryRow(jobContext: NamespaceInstanceJobContext?) -> some View {
         HStack(spacing: 8) {
             Image(systemName: expanded ? "chevron.down" : "chevron.right")
                 .font(.system(size: 8, weight: .semibold))
@@ -116,6 +117,22 @@ private struct NamespaceInstanceRow: View {
                         background: Color.primary.opacity(0.055)
                     )
                 }
+                if let jobContext {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.tertiary)
+                        Text(jobContext.branch.isEmpty ? "unknown branch" : jobContext.branch)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(jobContext.shortSha)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
                 HStack(spacing: 5) {
                     Text(instance.title)
                         .font(.system(size: 10))
@@ -130,6 +147,17 @@ private struct NamespaceInstanceRow: View {
                         foreground: .primary,
                         background: Color.primary.opacity(0.06)
                     )
+                    if let namespaceURL = jobContext?.namespaceURL {
+                        Button {
+                            NSWorkspace.shared.open(namespaceURL)
+                        } label: {
+                            Image(systemName: "arrow.up.forward.square")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.blue)
+                        }
+                        .buttonStyle(.plain)
+                        .help(namespaceURL.absoluteString)
+                    }
                 }
             }
             Spacer(minLength: 6)
@@ -155,8 +183,10 @@ private struct NamespaceInstanceRow: View {
     }
 
     @ViewBuilder
-    private var detailPanel: some View {
-        if let detail = store.namespaceDetailsByInstanceID[instance.id] {
+    private func detailPanel(jobContext: NamespaceInstanceJobContext?) -> some View {
+        if let jobContext {
+            namespaceJobDetail(jobContext)
+        } else if let detail = store.namespaceDetailsByInstanceID[instance.id] {
             namespaceDetail(detail)
         } else if let error = store.namespaceDetailErrorsByInstanceID[instance.id] {
             namespaceError(error)
@@ -172,6 +202,47 @@ private struct NamespaceInstanceRow: View {
             .padding(6)
             .background(detailBackground)
         }
+    }
+
+    private func namespaceJobDetail(_ context: NamespaceInstanceJobContext) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "bolt.circle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(ShipyardColors.orange)
+                Text("\(context.workflowName) — \(context.jobName)")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                Text(context.branch.isEmpty ? "unknown branch" : context.branch)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(context.shortSha)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 8) {
+                if let namespaceURL = context.namespaceURL {
+                    linkButton("namespace", url: namespaceURL)
+                }
+                if let githubURL = context.githubURL {
+                    linkButton("github job", url: githubURL)
+                }
+                commandButton("top", command: "nsc top \(instance.id)")
+                commandButton("logs", command: "nsc logs \(instance.id) --limit 100")
+            }
+        }
+        .padding(6)
+        .background(detailBackground)
     }
 
     private func namespaceDetail(_ detail: NamespaceInstanceDetail) -> some View {
@@ -251,16 +322,20 @@ private struct NamespaceInstanceRow: View {
             commandButton("describe", command: "nsc describe \(instance.id) -o json")
             commandButton("top", command: "nsc top \(instance.id)")
             commandButton("logs", command: "nsc logs \(instance.id) --limit 100")
-            Button("cloud") {
-                if let url = URL(string: "https://cloud.namespace.so/") {
-                    NSWorkspace.shared.open(url)
-                }
+            if let url = URL(string: "https://cloud.namespace.so/") {
+                linkButton("cloud", url: url)
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 9, weight: .medium))
-            .foregroundStyle(.blue)
-            .help("Open Namespace Cloud. nsc does not currently expose per-instance web links.")
         }
+    }
+
+    private func linkButton(_ label: String, url: URL) -> some View {
+        Button(label) {
+            NSWorkspace.shared.open(url)
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 9, weight: .medium))
+        .foregroundStyle(.blue)
+        .help(url.absoluteString)
     }
 
     private func commandButton(_ label: String, command: String) -> some View {

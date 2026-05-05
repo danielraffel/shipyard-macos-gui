@@ -127,6 +127,9 @@ struct PopoverView: View {
                 if reason == .userDisabled && store.liveUpdateMode == .off {
                     return (.secondary, "polling (manual)")
                 }
+                if let reason, reason.isWebhookScopeMissing {
+                    return (.orange, reason.headerLabel)
+                }
                 return (.secondary, "polling")
             }
         }()

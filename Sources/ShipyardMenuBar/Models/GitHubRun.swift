@@ -24,6 +24,10 @@ struct GitHubRun: Identifiable, Equatable {
     /// already shows a run for (repo, headSha, workflowName), skip the
     /// row from the GitHub section.
     var dedupKey: String { "\(repo)\t\(headSha)\t\(workflowName.lowercased())" }
+
+    var shortSha: String {
+        String(headSha.prefix(7))
+    }
 }
 
 /// A single job within a run. `labels` carries the runner infra — e.g.
@@ -63,5 +67,28 @@ struct GitHubJob: Decodable, Equatable, Hashable {
     var runnerLabel: String {
         (labels ?? []).last ?? runnerName ?? "?"
     }
+
+    var namespaceInstanceID: String? {
+        guard let runnerName else { return nil }
+        let prefix = "nsc-runner-"
+        let lower = runnerName.lowercased()
+        guard lower.hasPrefix(prefix), runnerName.count > prefix.count else { return nil }
+        return String(runnerName.dropFirst(prefix.count))
+    }
 }
 
+struct NamespaceInstanceJobContext: Equatable, Hashable {
+    let repo: String
+    let workflowName: String
+    let jobName: String
+    let branch: String
+    let headSha: String
+    let runID: Int64
+    let jobID: Int64
+    let githubURL: URL?
+    let namespaceURL: URL?
+
+    var shortSha: String {
+        String(headSha.prefix(7))
+    }
+}

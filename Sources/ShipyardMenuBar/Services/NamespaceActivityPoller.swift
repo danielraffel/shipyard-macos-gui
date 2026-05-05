@@ -3,6 +3,7 @@ import Foundation
 struct NamespaceActivitySnapshot: Equatable {
     let instances: [NamespaceInstance]
     let error: String?
+    let workspaceSlug: String?
 }
 
 struct NamespaceInstanceDetailSnapshot: Equatable {
@@ -15,15 +16,26 @@ enum NamespaceActivityPoller {
         guard let nsc = resolveNSC() else {
             return NamespaceActivitySnapshot(
                 instances: [],
-                error: "nsc not found on PATH candidates"
+                error: "nsc not found on PATH candidates",
+                workspaceSlug: nil
             )
         }
-        let output = await runGHCapturing(
+        async let listOutput = runGHCapturing(
             executable: nsc,
             args: ["list", "--all", "-o", "json"],
             timeout: 12
         )
-        return decode(rawOutput: output)
+        async let workspaceOutput = runGHCapturing(
+            executable: nsc,
+            args: ["workspace", "describe", "-o", "json"],
+            timeout: 8
+        )
+        let snapshot = await decode(rawOutput: listOutput)
+        return NamespaceActivitySnapshot(
+            instances: snapshot.instances,
+            error: snapshot.error,
+            workspaceSlug: await decodeWorkspaceSlug(rawOutput: workspaceOutput)
+        )
     }
 
     static func fetchDetail(instanceID: String) async -> NamespaceInstanceDetailSnapshot {
@@ -47,21 +59,35 @@ enum NamespaceActivityPoller {
         else {
             return NamespaceActivitySnapshot(
                 instances: [],
-                error: "nsc returned no JSON; run nsc login if the session expired"
+                error: "nsc returned no JSON; run nsc login if the session expired",
+                workspaceSlug: nil
             )
         }
         do {
             let raw = try JSONDecoder().decode([RawInstance].self, from: data)
             return NamespaceActivitySnapshot(
                 instances: raw.compactMap(\.instance),
-                error: nil
+                error: nil,
+                workspaceSlug: nil
             )
         } catch {
             return NamespaceActivitySnapshot(
                 instances: [],
-                error: "could not parse nsc list JSON"
+                error: "could not parse nsc list JSON",
+                workspaceSlug: nil
             )
         }
+    }
+
+    static func decodeWorkspaceSlug(rawOutput: String) -> String? {
+        guard let json = extractJSONObject(from: rawOutput),
+              let data = json.data(using: .utf8),
+              let raw = try? JSONDecoder().decode(RawWorkspace.self, from: data)
+        else { return nil }
+        if let suffix = raw.tenantID.split(separator: "_").last, !suffix.isEmpty {
+            return String(suffix)
+        }
+        return nil
     }
 
     static func decodeDetail(rawOutput: String) -> NamespaceInstanceDetailSnapshot {
@@ -98,6 +124,18 @@ enum NamespaceActivityPoller {
         }
         guard let start = raw.firstIndex(of: "["),
               let end = raw.lastIndex(of: "]"),
+              start <= end
+        else { return nil }
+        return String(raw[start...end])
+    }
+
+    private static func extractJSONObject(from raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{") && trimmed.hasSuffix("}") {
+            return trimmed
+        }
+        guard let start = raw.firstIndex(of: "{"),
+              let end = raw.lastIndex(of: "}"),
               start <= end
         else { return nil }
         return String(raw[start...end])
@@ -144,6 +182,14 @@ enum NamespaceActivityPoller {
             case ingressDomain = "ingress_domain"
             case labels
             case shape
+        }
+    }
+
+    private struct RawWorkspace: Decodable {
+        let tenantID: String
+
+        enum CodingKeys: String, CodingKey {
+            case tenantID = "tenant_id"
         }
     }
 

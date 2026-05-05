@@ -103,4 +103,30 @@ final class NamespaceActivityTests: XCTestCase {
         XCTAssertNil(snapshot.error)
         XCTAssertEqual(snapshot.detail?.containers, [])
     }
+
+    func test_decodeWorkspaceSlug() {
+        let slug = NamespaceActivityPoller.decodeWorkspaceSlug(rawOutput: """
+        info: A new version of nsc is available.
+        {
+          "tenant_id": "tenant_1akd87unuh9oc",
+          "name": "Personal",
+          "registry_url": "nscr.io/1akd87unuh9oc"
+        }
+        """)
+
+        XCTAssertEqual(slug, "1akd87unuh9oc")
+    }
+
+    func test_githubJobNamespaceInstanceID() {
+        let job = GitHubJob(
+            databaseId: 74492977641,
+            name: "Coverage report (macOS, Clang)",
+            status: "in_progress",
+            conclusion: nil,
+            labels: ["namespace-profile-generouscorp-macos"],
+            runnerName: "nsc-runner-8tn86urd3gkf4"
+        )
+
+        XCTAssertEqual(job.namespaceInstanceID, "8tn86urd3gkf4")
+    }
 }

@@ -3,6 +3,20 @@
 All notable changes to shipyard-macos-gui are documented here. Each entry links
 to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/releases).
 
+## Unreleased
+
+<a id="v0115"></a>
+## [0.1.15] - 2026-05-05
+
+- Add GitHub webhook auth fallback UI that keeps polling and copies the `admin:repo_hook` remediation command.
+- Enrich Namespace rows from live webhook job data without making extra API calls when the job event already has runner details.
+
+<a id="v0114"></a>
+## [0.1.14] - 2026-05-05
+
+- Improve first-open responsiveness by deferring expensive GitHub enrichment and live-startup work until after the popover paints.
+- Add Namespace instance visibility, GitHub Actions not tracked by Shipyard, and clearer runner-section documentation.
+
 <a id="v0113"></a>
 ## [0.1.13] - 2026-05-05
 
@@ -52,6 +66,8 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 - fix: spinner stuck + empty-state collision + last-event counter ticks ([#7](https://github.com/danielraffel/shipyard-macos-gui/pull/7))
 
+[0.1.15]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.15
+[0.1.14]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.14
 [0.1.13]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.13
 [0.1.12]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.12
 [0.1.11]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.11

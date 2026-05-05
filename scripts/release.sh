@@ -156,6 +156,12 @@ xcrun hdiutil create \
   -ov -format UDZO \
   "$DMG" >/dev/null
 
+echo "→ Signing DMG"
+codesign --force --timestamp \
+  --sign "Developer ID Application: Daniel Raffel (${TEAM_ID})" \
+  "$DMG"
+codesign --verify --verbose "$DMG"
+
 # ── step 6: notarize the DMG, then staple + verify ──────────────────
 # Stapling needs a notarization ticket keyed by the DMG's own SHA —
 # the .app submission from step 3 doesn't produce one for the DMG.

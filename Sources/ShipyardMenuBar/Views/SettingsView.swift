@@ -145,10 +145,37 @@ struct SettingsView: View {
                         Text(reason.userFacing)
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
+                        if reason.isWebhookScopeMissing {
+                            copyWebhookScopeCommand
+                        }
                     }
                 }
             }
         }
+    }
+
+    private var copyWebhookScopeCommand: some View {
+        HStack(spacing: 6) {
+            Text(LiveUpdateStatus.PollingReason.webhookScopeCommand)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Button {
+                ClipboardToast.shared.copy(
+                    LiveUpdateStatus.PollingReason.webhookScopeCommand,
+                    label: "Copied command"
+                )
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.blue)
+            .help("Copy GitHub auth command")
+        }
+        .padding(.top, 2)
     }
 
     private var pollingTitle: String {
@@ -156,9 +183,9 @@ struct SettingsView: View {
             return "Starting live updates"
         }
         if case .polling(let reason) = store.liveStatus,
-           reason != nil,
-           store.liveUpdateMode == .on {
-            return "Warning — falling back to polling"
+           let reason,
+           reason != .userDisabled {
+            return reason.title
         }
         return "Polling every 60s"
     }
@@ -166,6 +193,9 @@ struct SettingsView: View {
     private func pollingIcon(for reason: LiveUpdateStatus.PollingReason?) -> String {
         if store.liveStartupPending {
             return "dot.radiowaves.left.and.right"
+        }
+        if reason?.isWebhookScopeMissing == true {
+            return "key.fill"
         }
         if store.liveUpdateMode == .on && reason != nil {
             return "exclamationmark.triangle.fill"
@@ -176,6 +206,9 @@ struct SettingsView: View {
     private func pollingTint(for reason: LiveUpdateStatus.PollingReason?) -> Color {
         if store.liveStartupPending {
             return .secondary
+        }
+        if reason?.isWebhookScopeMissing == true {
+            return .orange
         }
         if store.liveUpdateMode == .on && reason != nil {
             return .orange

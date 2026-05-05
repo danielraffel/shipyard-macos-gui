@@ -113,12 +113,14 @@ final class DaemonWireDecoderTests: XCTestCase {
             "subscribers": 3,
             "last_event_at": NSNull(),
             "registered_repos": ["org/repo"],
+            "last_error": "GitHub webhook management needs admin:repo_hook",
         ]
         let status = DaemonWireDecoder.decodeStatus(obj)
         XCTAssertEqual(status.tunnelBackend, "tailscale")
         XCTAssertEqual(status.tunnelURL?.absoluteString, "https://foo.ts.net")
         XCTAssertEqual(status.subscribers, 3)
         XCTAssertEqual(status.registeredRepos, ["org/repo"])
+        XCTAssertEqual(status.lastError, "GitHub webhook management needs admin:repo_hook")
     }
 
     func test_decideLetsDaemonOwnAutoModeTailscaleDiagnosis() {
@@ -143,6 +145,20 @@ final class DaemonWireDecoderTests: XCTestCase {
         let d = DaemonClient.decide(mode: .off, tailscale: ready)
         XCTAssertFalse(d.attemptLive)
         XCTAssertEqual(d.reason, .userDisabled)
+    }
+
+    func test_pollingReasonDetectsMissingWebhookScope() {
+        let reason = LiveUpdateStatus.PollingReason.tunnelStartFailed(
+            #"gh: This API operation needs the "admin:repo_hook" scope."#
+        )
+        XCTAssertTrue(reason.isWebhookScopeMissing)
+        XCTAssertTrue(reason.shouldWarn)
+        XCTAssertEqual(reason.headerLabel, "polling · hook auth")
+        XCTAssertEqual(
+            LiveUpdateStatus.PollingReason.webhookScopeCommand,
+            "gh auth refresh -h github.com -s admin:repo_hook"
+        )
+        XCTAssertTrue(reason.userFacing.contains("Polling continues"))
     }
 
     func test_runtimePathsDecodeRustPathsOutput() {

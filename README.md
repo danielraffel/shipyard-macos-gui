@@ -46,6 +46,14 @@ it isn't). Set **On** to require live with a warning when unavailable,
 or **Off** to force polling. Webhook events route through Tailscale's
 edge directly to your Mac — no Shipyard-operated backend in between.
 
+Webhook registration needs the GitHub CLI token to be allowed to manage repo
+hooks. If that scope is missing, the app keeps polling and shows a copy button
+for:
+
+```bash
+gh auth refresh -h github.com -s admin:repo_hook
+```
+
 ## Download
 
 **[Latest signed & notarized DMG](https://github.com/danielraffel/shipyard-macos-gui/releases/latest/download/Shipyard.dmg)**
@@ -74,17 +82,20 @@ Namespace instances every 30 seconds via `nsc list --all -o json`. These
 rows are runner VMs, not PRs or GitHub jobs. The UI mirrors Namespace Cloud's
 shape vocabulary where `nsc` exposes it: active instance, instance ID, platform
 (`mac/silicon`, `linux/amd64`, `win/amd64`), and size (`6x14`, `4x8`).
-Expanding a row fetches `nsc describe <instance> -o json` for container
-readiness when Namespace still has detail for that ephemeral instance, and
-provides copyable `nsc describe`, `nsc top`, and `nsc logs` commands.
+When an already-cached GitHub job reports `runner_name: nsc-runner-<instance>`,
+the row also shows workflow/branch/short SHA and links to the matching
+Namespace Cloud job page. Expanding an unmatched row falls back to
+`nsc describe <instance> -o json` for container readiness when Namespace still
+has detail for that ephemeral instance, and provides copyable `nsc describe`,
+`nsc top`, and `nsc logs` commands.
 
 The app shows every active instance returned by `nsc list`. It does not merge
 or hide rows against GitHub Actions because `nsc` does not expose stable job
 IDs locally; instead, the Runners view keeps Namespace instances in their own
 infrastructure section so the UI does not imply a PR/job mapping it cannot
 prove. Future improvements are waiting on `nsc` or an API to expose GitHub
-run/job IDs, runner assignment state, per-instance web/log URLs, and lifecycle
-events.
+run/job IDs, runner assignment state, stable per-instance URLs, and lifecycle
+events directly from Namespace.
 
 ## Runners view sections
 

@@ -239,6 +239,13 @@ final class DaemonClient {
         allowMissingTunnelDowngrade: Bool = true
     ) {
         cachedStatus = daemonStatus
+        if let error = daemonStatus.lastError {
+            let reason = LiveUpdateStatus.PollingReason.serverStartFailed(error)
+            if reason.isWebhookScopeMissing {
+                update(status: .polling(reason: reason))
+                return
+            }
+        }
         if let url = daemonStatus.tunnelURL {
             update(status: .live(tunnelURL: url, lastEventAt: lastEventAt))
         } else if !allowMissingTunnelDowngrade, case .live = status {
@@ -913,7 +920,7 @@ enum DaemonWireDecoder {
             tunnelURL: url,
             subscribers: subs,
             registeredRepos: repos,
-            lastError: nil
+            lastError: obj["last_error"] as? String
         )
     }
 
