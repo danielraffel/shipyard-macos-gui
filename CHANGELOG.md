@@ -6,7 +6,8 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 <a id="v0112"></a>
 ## [0.1.12] - 2026-05-05
 
-- codex/selected cli daemon paths ([#20](https://github.com/danielraffel/shipyard-macos-gui/pull/20))
+- Fix live-update status during Shipyard daemon tunnel warmup so the menu bar does not fall back to "polling" before the daemon reports its Tailscale Funnel URL.
+- Request daemon status before subscribing to live events, avoiding delayed status behind replayed event backlog.
 
 <a id="v0111"></a>
 ## [0.1.11] - 2026-05-04
