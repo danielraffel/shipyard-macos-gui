@@ -184,6 +184,11 @@ final class DaemonClient {
         }
     }
 
+    func stop() async {
+        await tearDown()
+        update(status: .polling(reason: .userDisabled))
+    }
+
     /// Pure-function decision table; same matrix as the old
     /// LiveModeController so the GUI's Auto/On/Off semantics don't
     /// shift in the migration.

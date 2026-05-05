@@ -121,7 +121,10 @@ struct PopoverView: View {
             case .live:
                 return (ShipyardColors.green, "live")
             case .polling(let reason):
-                if reason == .userDisabled {
+                if store.liveStartupPending {
+                    return (.secondary, "starting live")
+                }
+                if reason == .userDisabled && store.liveUpdateMode == .off {
                     return (.secondary, "polling (manual)")
                 }
                 return (.secondary, "polling")

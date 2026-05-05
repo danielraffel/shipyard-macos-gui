@@ -65,16 +65,7 @@ struct ShipCardView: View {
         )
         .onHover { hovering = $0 }
         .onAppear {
-            // Kick off branch-scoped fetch + PR state fetch on first
-            // render. These populate data the rest of the card reads.
-            store.fetchRunsForShipOnDemand(ship)
-            store.fetchPRStateIfNeeded(for: ship)
-            // Proactively fetch jobs for every nested run so platform
-            // lanes populate without waiting for "Other checks" to
-            // be expanded.
-            for run in store.githubRuns(for: ship) {
-                store.fetchJobsIfNeeded(for: run)
-            }
+            refreshVisibleDetails()
             // Auto-expand seed: one-shot decision per PR per session.
             // We set it on first onAppear when the setting is on AND
             // the PR is actively being worked on. Once set, it sticks
@@ -86,6 +77,17 @@ struct ShipCardView: View {
                 store.setExpanded(true, for: ship.prNumber)
             }
         }
+        .onChange(of: store.enrichmentGeneration) { _ in
+            refreshVisibleDetails()
+        }
+    }
+
+    private func refreshVisibleDetails() {
+        // Enrichment is deferred until after the popover paints;
+        // AppStore no-ops these calls during the first-open grace
+        // window so rendering stays responsive.
+        store.fetchRunsForShipOnDemand(ship)
+        store.fetchPRStateIfNeeded(for: ship)
     }
 
     /// Workflow runs that are NOT the source of any platform lane —

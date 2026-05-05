@@ -223,13 +223,21 @@ final class AppStore: ObservableObject {
         didSet {
             UserDefaults.standard.set(liveUpdateMode.rawValue, forKey: Keys.liveUpdateMode)
             if oldValue != liveUpdateMode {
-                Task { await reconcileLiveMode() }
+                if liveUpdateMode == .off {
+                    deferredLiveStartupTask?.cancel()
+                    deferredLiveStartupTask = nil
+                    liveStartupPending = false
+                    Task { await reconcileLiveMode() }
+                } else {
+                    scheduleDeferredLiveStartup(after: 0)
+                }
             }
         }
     }
 
     /// Latest resolved runtime state (live vs polling + reason).
-    @Published private(set) var liveStatus: LiveUpdateStatus = .polling(reason: .userDisabled)
+    @Published private(set) var liveStatus: LiveUpdateStatus = .polling(reason: nil)
+    @Published private(set) var liveStartupPending: Bool = false
 
     /// Latest Tailscale probe result. Re-run at launch + on foreground
     /// + every 60s while the app is open.
@@ -255,6 +263,7 @@ final class AppStore: ObservableObject {
         )
         await MainActor.run {
             self.liveStatus = self.liveController.status
+            self.liveStartupPending = false
         }
     }
 
@@ -384,10 +393,17 @@ final class AppStore: ObservableObject {
         didSet {
             UserDefaults.standard.set(showGitHubActions, forKey: Keys.showGitHubActions)
             if showGitHubActions {
-                startGitHubPolling()
+                if deferredStartupWorkStarted {
+                    startGitHubPolling()
+                    enrichmentGeneration += 1
+                    scheduleDeferredLiveStartup()
+                }
             } else {
                 stopGitHubPolling()
+                cancelGitHubDetailWork()
                 githubRunsByRepo = [:]
+                githubRunsByBranch = [:]
+                jobsByRunId = [:]
             }
         }
     }
@@ -404,16 +420,29 @@ final class AppStore: ObservableObject {
     /// Per-branch cache keyed by "repo\tbranch". Populated on card-
     /// expand so even old PR branches surface real runs.
     @Published var githubRunsByBranch: [String: [GitHubRun]] = [:]
+    @Published var namespaceInstances: [NamespaceInstance] = []
+    @Published var namespaceDetailsByInstanceID: [String: NamespaceInstanceDetail] = [:]
+    @Published private(set) var namespaceDetailErrorsByInstanceID: [String: String] = [:]
+    @Published private(set) var namespaceActivityUpdatedAt: Date?
+    @Published private(set) var namespaceActivityError: String?
 
     /// Latest REST rate-limit snapshot, polled every 2 min. Drives
     /// the exhaustion banner in ShipsView. `nil` until the first
     /// probe completes.
     @Published private(set) var githubRateLimit: GitHubRateLimit?
     private var rateLimitTask: Task<Void, Never>?
+    private var namespaceActivityTask: Task<Void, Never>?
+    private var namespaceDetailTasks: [String: Task<Void, Never>] = [:]
+    private var deferredStartupTask: Task<Void, Never>?
+    private var deferredLiveStartupTask: Task<Void, Never>?
+    private var hasOpenedPopover = false
+    private var deferredStartupWorkStarted = false
+    @Published var enrichmentGeneration: Int = 0
 
     func startRateLimitPolling() {
         rateLimitTask?.cancel()
         rateLimitTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             while !Task.isCancelled {
                 if let snapshot = await GitHubRateLimitPoller.fetch() {
                     await MainActor.run { self?.githubRateLimit = snapshot }
@@ -430,6 +459,77 @@ final class AppStore: ObservableObject {
     func stopRateLimitPolling() {
         rateLimitTask?.cancel()
         rateLimitTask = nil
+    }
+
+    func startNamespaceActivityPolling() {
+        namespaceActivityTask?.cancel()
+        namespaceActivityTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let snapshot = await NamespaceActivityPoller.fetch()
+                if Task.isCancelled { break }
+                await MainActor.run {
+                    self?.namespaceInstances = snapshot.instances
+                    self?.pruneNamespaceDetails(to: snapshot.instances)
+                    self?.namespaceActivityError = snapshot.error
+                    self?.namespaceActivityUpdatedAt = Date()
+                }
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+            }
+        }
+    }
+
+    func stopNamespaceActivityPolling() {
+        namespaceActivityTask?.cancel()
+        namespaceActivityTask = nil
+        cancelNamespaceDetailFetches()
+    }
+
+    func fetchNamespaceDetailIfNeeded(for instance: NamespaceInstance) {
+        let id = instance.id
+        guard namespaceDetailsByInstanceID[id] == nil,
+              namespaceDetailErrorsByInstanceID[id] == nil,
+              namespaceDetailTasks[id] == nil
+        else { return }
+
+        namespaceDetailTasks[id] = Task { [weak self] in
+            let snapshot = await NamespaceActivityPoller.fetchDetail(instanceID: id)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard let self else { return }
+                self.namespaceDetailTasks[id] = nil
+                if let detail = snapshot.detail {
+                    self.namespaceDetailsByInstanceID[id] = detail
+                    self.namespaceDetailErrorsByInstanceID.removeValue(forKey: id)
+                } else {
+                    self.namespaceDetailErrorsByInstanceID[id] = snapshot.error ?? "could not load Namespace instance detail"
+                }
+            }
+        }
+    }
+
+    func refreshNamespaceDetail(for instance: NamespaceInstance) {
+        namespaceDetailTasks[instance.id]?.cancel()
+        namespaceDetailTasks[instance.id] = nil
+        namespaceDetailsByInstanceID.removeValue(forKey: instance.id)
+        namespaceDetailErrorsByInstanceID.removeValue(forKey: instance.id)
+        fetchNamespaceDetailIfNeeded(for: instance)
+    }
+
+    private func pruneNamespaceDetails(to instances: [NamespaceInstance]) {
+        let liveIDs = Set(instances.map(\.id))
+        namespaceDetailsByInstanceID = namespaceDetailsByInstanceID.filter { liveIDs.contains($0.key) }
+        namespaceDetailErrorsByInstanceID = namespaceDetailErrorsByInstanceID.filter { liveIDs.contains($0.key) }
+        for id in Array(namespaceDetailTasks.keys) where !liveIDs.contains(id) {
+            namespaceDetailTasks[id]?.cancel()
+            namespaceDetailTasks[id] = nil
+        }
+    }
+
+    private func cancelNamespaceDetailFetches() {
+        for task in namespaceDetailTasks.values {
+            task.cancel()
+        }
+        namespaceDetailTasks.removeAll()
     }
 
     private var githubPollTask: Task<Void, Never>?
@@ -568,24 +668,141 @@ final class AppStore: ObservableObject {
         } else {
             restartPipelineIfPossible()
         }
-        if cliBinaryResolved != nil {
-            Task { await runDoctor() }
-        }
-        if showGitHubActions {
-            startGitHubPolling()
-        }
         liveController.onStatusChange = { [weak self] newStatus in
-            Task { @MainActor in self?.liveStatus = newStatus }
+            Task { @MainActor in
+                self?.liveStatus = newStatus
+                self?.liveStartupPending = false
+            }
         }
         liveController.onEvent = { [weak self] event in
             self?.apply(webhookEvent: event)
         }
+        if liveUpdateMode == .off {
+            liveStatus = .polling(reason: .userDisabled)
+        } else {
+            scheduleDeferredLiveStartup()
+        }
+        syncLaunchAtLoginFromSystem()
+    }
+
+    /// Called by the status-item host after the popover is visible.
+    /// Keep launch cheap: the first click should paint UI immediately,
+    /// then enrich in the background after AppKit has opened the menu.
+    func notePopoverOpened() {
+        hasOpenedPopover = true
+        guard !deferredStartupWorkStarted else {
+            if showGitHubActions {
+                startGitHubPolling()
+            }
+            return
+        }
+        deferredStartupTask?.cancel()
+        deferredStartupTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                self?.startDeferredStartupWork()
+            }
+        }
+    }
+
+    func notePopoverClosed() {
+        if !deferredStartupWorkStarted {
+            deferredStartupTask?.cancel()
+            deferredStartupTask = nil
+            hasOpenedPopover = false
+        }
+        // Keep the live daemon subscription warm while the popover is
+        // closed. Webhook updates are app-lifecycle state; expensive
+        // GitHub polling/detail enrichment is popover-lifecycle work.
+        stopGitHubPolling()
+        cancelGitHubDetailWork()
+    }
+
+    func shutdown() {
+        deferredStartupTask?.cancel()
+        deferredStartupTask = nil
+        deferredLiveStartupTask?.cancel()
+        deferredLiveStartupTask = nil
+        tailscaleProbeTask?.cancel()
+        tailscaleProbeTask = nil
+        stopGitHubPolling()
+        stopRateLimitPolling()
+        stopNamespaceActivityPolling()
+        cancelGitHubDetailWork()
+        let oldPipeline = pipeline
+        pipeline = nil
+        Task {
+            await oldPipeline?.stop()
+            await liveController.stop()
+        }
+    }
+
+    private func startDeferredStartupWork() {
+        guard hasOpenedPopover, !deferredStartupWorkStarted else { return }
+        deferredStartupWorkStarted = true
+        if cliBinaryResolved != nil {
+            Task { [weak self] in await self?.runDoctor() }
+        }
+        if showGitHubActions {
+            startGitHubPolling()
+            startRateLimitPolling()
+        }
+        startNamespaceActivityPolling()
+        enrichmentGeneration += 1
+    }
+
+    private var hasStartedLiveStartup = false
+
+    private func scheduleDeferredLiveStartup(after delay: UInt64 = 3_000_000_000) {
+        guard !hasStartedLiveStartup else { return }
+        guard liveUpdateMode != .off else {
+            liveStartupPending = false
+            liveStatus = .polling(reason: .userDisabled)
+            return
+        }
+        guard deferredLiveStartupTask == nil else {
+            markLiveStartupPendingIfNeeded()
+            return
+        }
+        markLiveStartupPendingIfNeeded()
+        deferredLiveStartupTask?.cancel()
+        deferredLiveStartupTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                self?.deferredLiveStartupTask = nil
+                self?.startLiveStartup()
+            }
+        }
+    }
+
+    private func startLiveStartup() {
+        guard !hasStartedLiveStartup else { return }
+        guard liveUpdateMode != .off else {
+            liveStartupPending = false
+            liveStatus = .polling(reason: .userDisabled)
+            return
+        }
+        hasStartedLiveStartup = true
+        liveStartupPending = true
         Task { [weak self] in
             await self?.reconcileLiveMode()
             await MainActor.run { self?.startTailscaleWatcher() }
         }
-        startRateLimitPolling()
-        syncLaunchAtLoginFromSystem()
+    }
+
+    private func markLiveStartupPendingIfNeeded() {
+        guard liveUpdateMode != .off else {
+            liveStartupPending = false
+            liveStatus = .polling(reason: .userDisabled)
+            return
+        }
+        if case .live = liveStatus {
+            return
+        }
+        liveStartupPending = true
+        liveStatus = .polling(reason: nil)
     }
 
     /// Reconcile the stored `launchAtLogin` preference with the OS's
@@ -835,18 +1052,6 @@ final class AppStore: ObservableObject {
             updated.append(old)
         }
 
-        for ship in updated {
-            fetchPRStateIfNeeded(for: ship)
-            // Skip auto-refresh for ships that can't transition again
-            // (merged / closed / stable terminal status). The user can
-            // still force a fetch by expanding the card. Active ships
-            // go through the TTL inside fetchRunsForShipOnDemand, so a
-            // high-cadence NDJSON stream doesn't burn the REST budget.
-            if ship.dismissed { continue }
-            if let pr = prState(for: ship), pr.isClosed { continue }
-            fetchRunsForShipOnDemand(ship)
-        }
-
         // Cache the unfiltered list so auto-clear setting changes can
         // re-run the filter without forcing a fresh poll (which costs
         // ~5-6s for the CLI cold start).
@@ -865,7 +1070,9 @@ final class AppStore: ObservableObject {
         // reconciled at launch (empty-repo race), re-run reconcile
         // so webhooks get registered on them.
         if knownRepos != previousRepos {
-            Task { [weak self] in await self?.reconcileLiveMode() }
+            if deferredStartupWorkStarted {
+                Task { [weak self] in await self?.reconcileLiveMode() }
+            }
         }
         reseedAutoExpand()
         detectBadgeTransition()
@@ -989,17 +1196,10 @@ final class AppStore: ObservableObject {
                     let previous = self.githubRunsByRepo[repo] ?? []
                     self.githubRunsByRepo[repo] = runs
                     self.reconcileJobsCache(newRuns: runs, oldRuns: previous)
-                    // Only fetch jobs for runs tied to a tracked ship
-                    // (branch or head_sha match). Fetching jobs for the
-                    // full top-100 burst ~100 `gh api` calls per repo
-                    // per poll — the unrelated-runs section doesn't
-                    // display job-level detail, so those fetches were
-                    // wasted budget. Ship-owned runs still get jobs so
-                    // the per-platform dot rollup stays accurate.
-                    let owned = self.ownedRunIds(for: repo)
-                    for run in runs where owned.contains(run.id) {
-                        self.fetchJobsIfNeeded(for: run)
-                    }
+                    // Job detail is now row-driven. Repo polling should
+                    // update run status cheaply; fan-out `gh run view`
+                    // calls are deferred until the user opens rows that
+                    // actually need provider/job details.
                     self.reseedAutoExpand()
                 }
             }
@@ -1103,6 +1303,9 @@ final class AppStore: ObservableObject {
     /// applySnapshot — prevents duplicate `gh run list` calls piling
     /// up when a ship's snapshot lands faster than the network.
     private var inflightBranchFetches: Set<String> = []
+    private var branchFetchTasks: [String: Task<Void, Never>] = [:]
+    private var pendingBranchFetches: [Ship] = []
+    private let maxConcurrentBranchFetches = 1
 
     /// Last wall-clock fetch time per branch. Paired with
     /// `branchFetchTTL` to rate-limit automatic priming from
@@ -1118,6 +1321,7 @@ final class AppStore: ObservableObject {
     /// (card expand) pass `force: true` so the user always gets a
     /// fresh fetch when they explicitly ask for detail.
     func fetchRunsForShipOnDemand(_ ship: Ship, force: Bool = false) {
+        guard deferredStartupWorkStarted || force else { return }
         guard showGitHubActions,
               !ship.repo.isEmpty,
               !ship.branch.isEmpty else { return }
@@ -1125,28 +1329,58 @@ final class AppStore: ObservableObject {
         let branch = ship.branch
         let key = "\(repo)\t\(branch)"
         if inflightBranchFetches.contains(key) { return }
+        if pendingBranchFetches.contains(where: { "\($0.repo)\t\($0.branch)" == key }) {
+            return
+        }
         if !force,
            let last = lastBranchFetch[key],
            Date().timeIntervalSince(last) < branchFetchTTL {
             return
         }
+        if inflightBranchFetches.count >= maxConcurrentBranchFetches {
+            pendingBranchFetches.append(ship)
+            return
+        }
+        startBranchFetch(repo: repo, branch: branch, key: key)
+    }
+
+    private func startBranchFetch(repo: String, branch: String, key: String) {
         inflightBranchFetches.insert(key)
-        Task {
+        let task = Task { [weak self] in
             let runs = await GitHubActionsPoller.fetch(
                 repo: repo, branch: branch, limit: 50
             )
+            if Task.isCancelled { return }
             await MainActor.run {
-                defer { self.inflightBranchFetches.remove(key) }
+                guard let self else { return }
+                defer {
+                    self.inflightBranchFetches.remove(key)
+                    self.branchFetchTasks.removeValue(forKey: key)
+                    self.drainBranchFetchQueue()
+                }
                 self.lastBranchFetch[key] = Date()
                 guard let runs else { return }
                 let previous = self.githubRunsByBranch[key] ?? []
                 self.githubRunsByBranch[key] = runs
                 self.reconcileJobsCache(newRuns: runs, oldRuns: previous)
-                for run in runs {
-                    self.fetchJobsIfNeeded(for: run)
-                }
                 self.reseedAutoExpand()
             }
+        }
+        branchFetchTasks[key] = task
+    }
+
+    private func drainBranchFetchQueue() {
+        while inflightBranchFetches.count < maxConcurrentBranchFetches,
+              !pendingBranchFetches.isEmpty {
+            let next = pendingBranchFetches.removeFirst()
+            guard !next.repo.isEmpty, !next.branch.isEmpty else { continue }
+            let key = "\(next.repo)\t\(next.branch)"
+            if inflightBranchFetches.contains(key) { continue }
+            if let last = lastBranchFetch[key],
+               Date().timeIntervalSince(last) < branchFetchTTL {
+                continue
+            }
+            startBranchFetch(repo: next.repo, branch: next.branch, key: key)
         }
     }
 
@@ -1164,6 +1398,9 @@ final class AppStore: ObservableObject {
     /// when the snapshot stream is noisy.
     private var lastPRStateFetchAttempt: [String: Date] = [:]
     private let prStateFetchCooldown: TimeInterval = 60
+    private var prStateFetchTasks: [String: Task<Void, Never>] = [:]
+    private var pendingPRStateFetches: [Ship] = []
+    private let maxConcurrentPRStateFetches = 1
 
     private func prKey(repo: String, pr: Int) -> String { "\(repo)\t\(pr)" }
 
@@ -1172,32 +1409,63 @@ final class AppStore: ObservableObject {
     }
 
     func fetchPRStateIfNeeded(for ship: Ship) {
+        guard deferredStartupWorkStarted else { return }
         let key = prKey(repo: ship.repo, pr: ship.prNumber)
         if prStateByKey[key] != nil { return }
         if inflightPRStateFetches.contains(key) { return }
+        if pendingPRStateFetches.contains(where: { prKey(repo: $0.repo, pr: $0.prNumber) == key }) {
+            return
+        }
         if let last = lastPRStateFetchAttempt[key],
            Date().timeIntervalSince(last) < prStateFetchCooldown {
             return
         }
+        if inflightPRStateFetches.count >= maxConcurrentPRStateFetches {
+            pendingPRStateFetches.append(ship)
+            return
+        }
+        startPRStateFetch(ship: ship, key: key)
+    }
+
+    private func startPRStateFetch(ship: Ship, key: String) {
         inflightPRStateFetches.insert(key)
         lastPRStateFetchAttempt[key] = Date()
         let repo = ship.repo
         let pr = ship.prNumber
-        Task {
-            if let state = await PRStatePoller.fetch(repo: repo, pr: pr) {
-                await MainActor.run {
-                    self.prStateByKey[key] = state
-                    self.inflightPRStateFetches.remove(key)
-                    // PR state arriving can flip isActivelyWorkedOn —
-                    // re-seed so open PRs get auto-expanded once we
-                    // actually know they're open.
-                    self.reseedAutoExpand()
-                }
-            } else {
-                await MainActor.run {
-                    self.inflightPRStateFetches.remove(key)
-                }
+        let task = Task { [weak self] in
+            let state = await PRStatePoller.fetch(repo: repo, pr: pr)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                self?.finishPRStateFetch(key: key, state: state)
             }
+        }
+        prStateFetchTasks[key] = task
+    }
+
+    private func finishPRStateFetch(key: String, state: PRState?) {
+        if let state {
+            prStateByKey[key] = state
+        }
+        inflightPRStateFetches.remove(key)
+        prStateFetchTasks.removeValue(forKey: key)
+        if state != nil {
+            reseedAutoExpand()
+        }
+        drainPRStateFetchQueue()
+    }
+
+    private func drainPRStateFetchQueue() {
+        while inflightPRStateFetches.count < maxConcurrentPRStateFetches,
+              !pendingPRStateFetches.isEmpty {
+            let next = pendingPRStateFetches.removeFirst()
+            let key = prKey(repo: next.repo, pr: next.prNumber)
+            if prStateByKey[key] != nil { continue }
+            if inflightPRStateFetches.contains(key) { continue }
+            if let last = lastPRStateFetchAttempt[key],
+               Date().timeIntervalSince(last) < prStateFetchCooldown {
+                continue
+            }
+            startPRStateFetch(ship: next, key: key)
         }
     }
 
@@ -1208,21 +1476,70 @@ final class AppStore: ObservableObject {
     /// "fetched, but no jobs."
     @Published var jobsByRunId: [Int64: [GitHubJob]] = [:]
     private var inflightJobFetches: Set<Int64> = []
+    private var jobFetchTasks: [Int64: Task<Void, Never>] = [:]
+    private var pendingJobFetches: [GitHubRun] = []
+    private let maxConcurrentJobFetches = 2
 
     func fetchJobsIfNeeded(for run: GitHubRun) {
+        guard deferredStartupWorkStarted else { return }
         guard showGitHubActions else { return }
         if jobsByRunId[run.id] != nil { return }
         if inflightJobFetches.contains(run.id) { return }
+        if pendingJobFetches.contains(where: { $0.id == run.id }) { return }
+        if inflightJobFetches.count >= maxConcurrentJobFetches {
+            pendingJobFetches.append(run)
+            return
+        }
+        startJobFetch(run)
+    }
+
+    private func startJobFetch(_ run: GitHubRun) {
         inflightJobFetches.insert(run.id)
         let repo = run.repo
         let id = run.id
-        Task {
+        let task = Task { [weak self] in
             let jobs = await GitHubActionsPoller.fetchJobs(repo: repo, runId: id) ?? []
+            if Task.isCancelled { return }
             await MainActor.run {
-                self.jobsByRunId[id] = jobs
-                self.inflightJobFetches.remove(id)
+                self?.finishJobFetch(id: id, jobs: jobs)
             }
         }
+        jobFetchTasks[id] = task
+    }
+
+    private func finishJobFetch(id: Int64, jobs: [GitHubJob]) {
+        jobsByRunId[id] = jobs
+        inflightJobFetches.remove(id)
+        jobFetchTasks.removeValue(forKey: id)
+        reseedAutoExpand()
+        drainJobFetchQueue()
+    }
+
+    private func drainJobFetchQueue() {
+        while inflightJobFetches.count < maxConcurrentJobFetches,
+              !pendingJobFetches.isEmpty {
+            let next = pendingJobFetches.removeFirst()
+            if jobsByRunId[next.id] != nil { continue }
+            if inflightJobFetches.contains(next.id) { continue }
+            startJobFetch(next)
+        }
+    }
+
+    private func cancelGitHubDetailWork() {
+        for task in prStateFetchTasks.values { task.cancel() }
+        prStateFetchTasks.removeAll()
+        inflightPRStateFetches.removeAll()
+        pendingPRStateFetches.removeAll()
+
+        for task in branchFetchTasks.values { task.cancel() }
+        branchFetchTasks.removeAll()
+        inflightBranchFetches.removeAll()
+        pendingBranchFetches.removeAll()
+
+        for task in jobFetchTasks.values { task.cancel() }
+        jobFetchTasks.removeAll()
+        inflightJobFetches.removeAll()
+        pendingJobFetches.removeAll()
     }
 
     /// Best-effort runner-provider summary for a run: the distinct set
@@ -1232,6 +1549,10 @@ final class AppStore: ObservableObject {
         guard let jobs = jobsByRunId[run.id] else { return nil }
         let uniq = Array(Set(jobs.map(\.provider))).sorted()
         return uniq
+    }
+
+    func visibleNamespaceInstances() -> [NamespaceInstance] {
+        namespaceInstances.sorted { $0.createdAt > $1.createdAt }
     }
 
     /// When a ship has no dispatched_runs of its own but GitHub did

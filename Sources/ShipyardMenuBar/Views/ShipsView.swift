@@ -15,14 +15,9 @@ struct ShipsView: View {
                     emptyState
                 } else {
                     ActivitySummaryStrip()
+                    NamespaceActivitySection()
                     headerBar
-                    if store.groupByWorktree {
-                        groupedView
-                    } else {
-                        ForEach(visibleShips) { ship in
-                            ShipCardView(ship: ship)
-                        }
-                    }
+                    trackedPRGroupsView
                     GitHubActionsSection()
                     scopeFooter
                 }
@@ -132,13 +127,55 @@ struct ShipsView: View {
         }
         let hasUnrelated = !store.unrelatedGitHubRuns().isEmpty
         if hasUnrelated {
-            return "Tracked PRs from this machine and recent GitHub Actions."
+            return "Tracked PRs from this machine, recent GitHub Actions, and active Namespace instances."
+        }
+        if !store.visibleNamespaceInstances().isEmpty {
+            return "Tracked PRs from this machine and active Namespace instances."
         }
         return "Tracked PRs from this machine."
     }
 
-    private var groupedView: some View {
-        let groups = Dictionary(grouping: visibleShips) { $0.worktree.isEmpty ? "—" : $0.worktree }
+    private var trackedPRGroupsView: some View {
+        let groups = Dictionary(grouping: visibleShips) { ship in
+            ship.repo.isEmpty ? "unknown repo" : ship.repo
+        }
+        let sortedRepos = groups.keys.sorted()
+        return ForEach(sortedRepos, id: \.self) { repo in
+            repoGroup(repo: repo, ships: groups[repo] ?? [])
+        }
+    }
+
+    private func repoGroup(repo: String, ships: [Ship]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "shippingbox")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                Text(repo)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Text("\(ships.count)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
+
+            if store.groupByWorktree {
+                worktreeGroups(for: ships)
+            } else {
+                ForEach(ships) { ship in
+                    ShipCardView(ship: ship)
+                }
+            }
+        }
+    }
+
+    private func worktreeGroups(for ships: [Ship]) -> some View {
+        let groups = Dictionary(grouping: ships) { $0.worktree.isEmpty ? "—" : $0.worktree }
         let sortedKeys = groups.keys.sorted()
         return ForEach(sortedKeys, id: \.self) { key in
             VStack(alignment: .leading, spacing: 6) {
@@ -412,11 +449,13 @@ struct ShipsView: View {
 
     private var cadenceIcon: String {
         if case .live = store.liveStatus { return "dot.radiowaves.left.and.right" }
+        if store.liveStartupPending { return "dot.radiowaves.left.and.right" }
         return "arrow.clockwise"
     }
 
     private var cadenceLabel: String {
         if case .live = store.liveStatus { return "Live via Tailscale Funnel" }
+        if store.liveStartupPending { return "Starting live updates" }
         return "Polling every 60s"
     }
 }

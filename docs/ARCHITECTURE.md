@@ -29,6 +29,7 @@ We explicitly do **not** use:
  shipyard --json ship-state list  ─▶  ShipyardPipeline
  daemon IPC ship-state-list       ─▶  ShipStateListPoller
  daemon IPC subscribe/events      ─▶  DaemonClient
+ nsc list/describe JSON           ─▶  NamespaceActivityPoller
  shipyard doctor --json           ◀─  AppStore  (@MainActor, ObservableObject)
  shipyard cloud retarget/add-lane ◀─  SwiftUI views
 ```
@@ -49,6 +50,46 @@ We explicitly do **not** use:
   list is no longer watch-first.
 - **One-shot subprocesses** (`doctor`, `retarget`, `add-lane`) run ad-hoc via
   a simple `Process` helper; no long-lived connection.
+- **NamespaceActivityPoller** samples `nsc list --all -o json` every 30 seconds
+  for raw Namespace runner instances and lazily runs `nsc describe <id> -o json`
+  when a row is expanded. This does not spend GitHub API quota.
+- **GitHub Actions not tracked by Shipyard** is derived from the existing
+  `gh run list` cache. The GUI intentionally does not call `gh pr list`
+  automatically, so this view adds no extra GitHub API calls beyond the
+  Actions polling already needed for CI status.
+
+## Runners View Semantics
+
+The Runners view keeps three concepts separate:
+
+- Tracked PR cards come only from local Shipyard `ship-state` and are the
+  only rows with Shipyard actions.
+- GitHub Actions not tracked by Shipyard are workflow runs from `gh run list`
+  that do not match local Shipyard state by branch or SHA. They may be
+  PR-related, main/tag workflows, manual dispatches, or scheduled jobs; without
+  `gh pr list`, the app does not know enough to render them as PR cards.
+- Namespace rows are raw runner instances from `nsc list`, not PRs or jobs.
+
+## Namespace visibility
+
+Namespace data is intentionally presented as instance-level infrastructure
+state, not as PR/job state. A GitHub PR can create multiple workflow runs, each
+run can create multiple jobs, and Namespace can provision runner instances that
+are not yet assigned to a job. Until `nsc` exposes stable GitHub run/job IDs,
+the GUI does not attempt exact merging with GitHub job rows; it shows every
+active `nsc list` instance in a separate infrastructure section.
+
+The row chrome intentionally follows Namespace Cloud's instance vocabulary only
+for fields returned by `nsc list`: active instance, ID, platform, and size. The
+GUI does not infer workflow names, "no job yet", or per-instance links because
+those fields are not exposed locally.
+
+Future Namespace UX depends on richer `nsc` or API fields:
+
+- GitHub run ID and job ID for exact dedupe and direct github.com links.
+- Runner assignment state so idle, queued, and busy instances render distinctly.
+- Per-instance web or log URLs for one-click drill-in from the menu bar.
+- Lifecycle events so Namespace rows can update live instead of every 30 seconds.
 
 ## Binary discovery
 

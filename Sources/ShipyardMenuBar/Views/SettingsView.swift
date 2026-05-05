@@ -137,7 +137,11 @@ struct SettingsView: View {
                     Text(pollingTitle)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(pollingTint(for: reason))
-                    if let reason {
+                    if store.liveStartupPending {
+                        Text("Live mode will connect after the menu has painted so the UI stays responsive.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    } else if let reason {
                         Text(reason.userFacing)
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
@@ -148,6 +152,9 @@ struct SettingsView: View {
     }
 
     private var pollingTitle: String {
+        if store.liveStartupPending {
+            return "Starting live updates"
+        }
         if case .polling(let reason) = store.liveStatus,
            reason != nil,
            store.liveUpdateMode == .on {
@@ -157,6 +164,9 @@ struct SettingsView: View {
     }
 
     private func pollingIcon(for reason: LiveUpdateStatus.PollingReason?) -> String {
+        if store.liveStartupPending {
+            return "dot.radiowaves.left.and.right"
+        }
         if store.liveUpdateMode == .on && reason != nil {
             return "exclamationmark.triangle.fill"
         }
@@ -164,6 +174,9 @@ struct SettingsView: View {
     }
 
     private func pollingTint(for reason: LiveUpdateStatus.PollingReason?) -> Color {
+        if store.liveStartupPending {
+            return .secondary
+        }
         if store.liveUpdateMode == .on && reason != nil {
             return .orange
         }
@@ -313,7 +326,7 @@ struct SettingsView: View {
 
     private var displaySection: some View {
         Section("Display") {
-            Toggle("Group PRs by worktree", isOn: $store.groupByWorktree)
+            Toggle("Group PRs by worktree within repo", isOn: $store.groupByWorktree)
             Toggle("Auto-expand active PRs", isOn: $store.autoExpandActivePRs)
             Text("When on, only PRs that are actively running or updated within the last 30 minutes open by default. Stays expanded until you collapse or quit the app.")
                 .font(.system(size: 10))

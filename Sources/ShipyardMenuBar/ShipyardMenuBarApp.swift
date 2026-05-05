@@ -32,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = StatusItemController(store: store)
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        store.shutdown()
+    }
+
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
     }

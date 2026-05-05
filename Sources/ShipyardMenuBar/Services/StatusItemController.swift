@@ -55,22 +55,27 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            popover.show(
-                relativeTo: sender.bounds,
-                of: sender,
-                preferredEdge: .minY
-            )
-            popover.contentViewController?.view.window?.makeKey()
+            showPopover(relativeTo: sender)
         }
     }
 
     func show() {
         if let button = statusItem.button, !popover.isShown {
-            popover.show(
-                relativeTo: button.bounds,
-                of: button,
-                preferredEdge: .minY
-            )
+            showPopover(relativeTo: button)
         }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        store.notePopoverClosed()
+    }
+
+    private func showPopover(relativeTo button: NSStatusBarButton) {
+        popover.show(
+            relativeTo: button.bounds,
+            of: button,
+            preferredEdge: .minY
+        )
+        popover.contentViewController?.view.window?.makeKey()
+        store.notePopoverOpened()
     }
 }

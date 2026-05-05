@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// One-line summary at the top of the Runners view answering
-/// "what's actually happening right now?". Counts across both
-/// Shipyard dispatched_runs AND GitHub Actions runs.
+/// "what's actually happening right now?". Counts Shipyard
+/// dispatched_runs, GitHub Actions runs, and raw Namespace instances.
 struct ActivitySummaryStrip: View {
     @EnvironmentObject var store: AppStore
 
@@ -24,6 +24,11 @@ struct ActivitySummaryStrip: View {
                     stat(icon: "bolt.circle.fill",
                          tint: ShipyardColors.blue,
                          text: "\(stats.ghRunning) on GitHub")
+                }
+                if stats.namespaceRunning > 0 {
+                    stat(icon: "server.rack",
+                         tint: ShipyardColors.orange,
+                         text: "\(stats.namespaceRunning) on NSC")
                 }
                 if stats.ghCompleted > 0 {
                     stat(icon: "checkmark.circle.fill",
@@ -54,6 +59,7 @@ struct ActivitySummaryStrip: View {
             Text(text)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.primary)
+                .lineLimit(1)
         }
     }
 
@@ -62,7 +68,8 @@ struct ActivitySummaryStrip: View {
         var ghRunning: Int = 0
         var ghCompleted: Int = 0
         var ghFailed: Int = 0
-        var totalActive: Int { shipyardRunning + ghRunning }
+        var namespaceRunning: Int = 0
+        var totalActive: Int { shipyardRunning + ghRunning + namespaceRunning }
         var totalCompleted: Int { ghCompleted + ghFailed }
     }
 
@@ -90,6 +97,7 @@ struct ActivitySummaryStrip: View {
                 else if run.conclusion == "success" { s.ghCompleted += 1 }
             }
         }
+        s.namespaceRunning = store.visibleNamespaceInstances().count
         return s
     }
 }

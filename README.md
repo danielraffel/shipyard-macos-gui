@@ -15,6 +15,8 @@ into a shell:
 - **Add a lane** (macOS / Linux / Windows / iOS / Android) to an in-flight PR
   without re-dispatching the whole matrix.
 - Click straight through to the GitHub run, the PR, or logs.
+- See active Namespace runner instances from `nsc list` without spending
+  GitHub API quota.
 - `shipyard doctor` output in a dedicated pane.
 - Notifications on merge / fail / all-green.
 
@@ -64,6 +66,43 @@ Older CLIs fall back to the legacy
 The Tailscale App Store build is supported for live mode; the app probes
 `/Applications/Tailscale.app/Contents/MacOS/Tailscale` before Homebrew
 or system PATH locations.
+
+## Namespace instances
+
+When `nsc` is installed and authenticated, the Runners view shows raw
+Namespace instances every 30 seconds via `nsc list --all -o json`. These
+rows are runner VMs, not PRs or GitHub jobs. The UI mirrors Namespace Cloud's
+shape vocabulary where `nsc` exposes it: active instance, instance ID, platform
+(`mac/silicon`, `linux/amd64`, `win/amd64`), and size (`6x14`, `4x8`).
+Expanding a row fetches `nsc describe <instance> -o json` for container
+readiness when Namespace still has detail for that ephemeral instance, and
+provides copyable `nsc describe`, `nsc top`, and `nsc logs` commands.
+
+The app shows every active instance returned by `nsc list`. It does not merge
+or hide rows against GitHub Actions because `nsc` does not expose stable job
+IDs locally; instead, the Runners view keeps Namespace instances in their own
+infrastructure section so the UI does not imply a PR/job mapping it cannot
+prove. Future improvements are waiting on `nsc` or an API to expose GitHub
+run/job IDs, runner assignment state, per-instance web/log URLs, and lifecycle
+events.
+
+## Runners view sections
+
+The Runners view separates three different data sources so rows do not
+overlap or imply more certainty than the app has:
+
+- **Tracked PRs** are Shipyard-managed work from local
+  `shipyard ship-state list`. These are the only rows rendered as PR cards
+  with Shipyard actions such as retargeting or adding lanes. They are grouped
+  by repo, with optional worktree sub-grouping.
+- **GitHub Actions not tracked by Shipyard** are workflow runs from the
+  existing `gh run list` cache that do not match local Shipyard state by
+  branch or SHA. The GUI intentionally does not call `gh pr list`; GitHub API
+  quota is reserved for CI status. These rows may be PR-related, main/tag
+  workflows, manual dispatches, or scheduled jobs, so they are rendered as
+  Actions runs, not PR cards.
+- **Namespace instances** are raw runner VMs from `nsc list`. They are
+  infrastructure, not PRs or jobs.
 
 ## Build locally
 

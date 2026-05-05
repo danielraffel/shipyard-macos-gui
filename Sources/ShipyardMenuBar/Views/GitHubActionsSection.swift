@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Rendered below the ship cards. Lists recent GitHub Actions runs per
-/// repo the app has seen ship-states for, scoped by the Settings →
-/// "Time window" and "Hide workflows matching" filters.
+/// Rendered above the tracked PR cards. Lists recent GitHub Actions
+/// workflow runs that do not match a local Shipyard card. This is not
+/// a PR list and intentionally uses the existing Actions polling path
+/// instead of adding `gh pr list` calls.
 struct GitHubActionsSection: View {
     @EnvironmentObject var store: AppStore
 
@@ -37,7 +38,7 @@ struct GitHubActionsSection: View {
                     Image(systemName: "bolt.circle")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
-                    Text("Other GitHub Actions runs")
+                    Text("GitHub Actions not tracked by Shipyard")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .textCase(.uppercase)
@@ -67,7 +68,7 @@ struct GitHubActionsSection: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Runs that don't match a PR opened from this machine — main/tag workflows, scheduled jobs, manual dispatches, and other contributors' PRs.")
+        .help("Runs from the existing gh run list cache that do not match local Shipyard ship-state by branch or SHA. No extra gh pr list calls are made.")
     }
 
     @ViewBuilder
