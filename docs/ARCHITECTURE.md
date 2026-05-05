@@ -24,23 +24,29 @@ We explicitly do **not** use:
 ## Data flow
 
 ```
- shipyard CLI                   app process
- ────────────                   ───────────
- shipyard watch --json ──── stdout ───▶  ShipyardCLIRunner (actor)
-                                                │
-                                                ▼
- shipyard doctor --json  ◀───── on-demand ───  AppStore  (@MainActor, @Observable)
-                                                │
-                                                ▼
- shipyard cloud retarget / add-lane             SwiftUI views
-  (one-shot invocations)        ◀──────────── user actions
+ shipyard CLI / daemon                 app process
+ ─────────────────────                 ───────────
+ shipyard --json ship-state list  ─▶  ShipyardPipeline
+ daemon IPC ship-state-list       ─▶  ShipStateListPoller
+ daemon IPC subscribe/events      ─▶  DaemonClient
+ shipyard doctor --json           ◀─  AppStore  (@MainActor, ObservableObject)
+ shipyard cloud retarget/add-lane ◀─  SwiftUI views
 ```
 
 - **AppStore** is the single source of truth, runs on the main actor, owns
   published UI state, and persists settings through UserDefaults.
-- **ShipyardCLIRunner** is an actor that spawns `shipyard watch --json --follow`
-  and streams one line per NDJSON event. It respawns on EOF with a 2-second
-  backoff so a transient CLI crash doesn't kill the observer.
+- **ShipyardPipeline** polls `shipyard --json ship-state list` every 7 seconds
+  for the authoritative snapshot. It emits an immediate empty snapshot at
+  startup so the UI does not stay stuck on a spinner while the CLI warms up.
+- **ShipStateListPoller** prefers the daemon IPC `ship-state-list` request
+  because the daemon serves the same JSON from memory in milliseconds. If the
+  daemon socket is unavailable or too old, it falls back to the CLI subprocess.
+- **DaemonClient** owns live mode: it can start `shipyard daemon`, subscribe to
+  the daemon socket for webhook events, and mirror daemon status/tunnel state
+  into the UI.
+- **ShipyardCLIRunner** remains a long-lived NDJSON subprocess wrapper for
+  command paths that need `shipyard watch --json --follow`, but the main ship
+  list is no longer watch-first.
 - **One-shot subprocesses** (`doctor`, `retarget`, `add-lane`) run ad-hoc via
   a simple `Process` helper; no long-lived connection.
 
@@ -51,10 +57,47 @@ Checked in order, first hit wins:
 1. `UserDefaults.standard.string(forKey: "cliBinaryPath")` — user override.
 2. `/usr/local/bin/shipyard`
 3. `/opt/homebrew/bin/shipyard`
-4. `~/.local/bin/shipyard`
+4. `~/.pulp/bin/shipyard`
+5. `~/.local/bin/shipyard`
 
 If none is found, `cliBinaryError` is surfaced in the UI and the Doctor + Ships
 tabs show an actionable prompt.
+
+The same order is used by `DaemonClient` when spawning the daemon, so Settings
+does not accidentally point normal CLI calls at one binary while live mode
+starts another.
+
+## Daemon runtime paths
+
+Rust Shipyard exposes `shipyard --json paths`. When available, the GUI uses it
+to derive:
+
+- `daemon_dir`
+- `daemon_socket`
+- `daemon_pid_file`
+
+This is important for side-by-side validation and future compatibility because
+the selected CLI owns its own runtime layout. Older Python CLIs without
+`paths` fall back to:
+
+```text
+~/Library/Application Support/shipyard/daemon/daemon.sock
+```
+
+## Tailscale probing
+
+Live mode uses Tailscale Funnel through the Shipyard daemon. The GUI's
+Tailscale probe checks these binaries in order:
+
+1. `/Applications/Tailscale.app/Contents/MacOS/Tailscale`
+2. `/opt/homebrew/bin/tailscale`
+3. `/usr/local/bin/tailscale`
+4. `/usr/bin/tailscale`
+
+The App Store Tailscale build is intentionally first because it may be present
+without a working `tailscale` PATH shim. In Auto/On live mode the daemon is
+still authoritative: if the GUI probe is uncertain, the GUI attempts daemon
+connection and surfaces the daemon's real failure reason.
 
 ## Sandbox + entitlements
 
