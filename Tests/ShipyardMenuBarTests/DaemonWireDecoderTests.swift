@@ -207,4 +207,66 @@ final class DaemonWireDecoderTests: XCTestCase {
         let paths = DaemonRuntimePathResolver.paths(for: fakeCLI.path)
         XCTAssertEqual(paths, DaemonRuntimePaths.legacy())
     }
+
+    func test_signedRustBinaryOverrideMatchesGuiContracts() throws {
+        guard let binary = ProcessInfo.processInfo.environment["SHIPYARD_GUI_TEST_RUST_BINARY"],
+              !binary.isEmpty
+        else {
+            throw XCTSkip("Set SHIPYARD_GUI_TEST_RUST_BINARY to validate a signed Rust CLI artifact")
+        }
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: binary))
+
+        let pathsOutput = try runShipyard(binary, ["--json", "paths"])
+        let paths = DaemonRuntimePaths.decode(json: pathsOutput)
+        XCTAssertNotNil(paths)
+        XCTAssertFalse(paths?.socketPath.isEmpty ?? true)
+        XCTAssertFalse(paths?.pidFilePath.isEmpty ?? true)
+
+        let doctorOutput = try runShipyard(binary, ["--json", "doctor"])
+        let data = try XCTUnwrap(doctorOutput.data(using: .utf8))
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(json["command"] as? String, "doctor")
+        XCTAssertEqual(json["ready"] as? Bool, true)
+        let checks = try XCTUnwrap(json["checks"] as? [String: Any])
+        XCTAssertNotNil(checks["Core"])
+    }
+
+    private func runShipyard(_ binary: String, _ arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+
+        let group = DispatchGroup()
+        var stdoutData = Data()
+        var stderrData = Data()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+            stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            group.leave()
+        }
+
+        guard group.wait(timeout: .now() + 5) == .success else {
+            if process.isRunning {
+                process.terminate()
+            }
+            XCTFail("shipyard command timed out: \(arguments.joined(separator: " "))")
+            return ""
+        }
+        let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+        XCTAssertEqual(
+            process.terminationStatus,
+            0,
+            "shipyard \(arguments.joined(separator: " ")) failed: \(stderrText)"
+        )
+        return String(data: stdoutData, encoding: .utf8) ?? ""
+    }
 }
