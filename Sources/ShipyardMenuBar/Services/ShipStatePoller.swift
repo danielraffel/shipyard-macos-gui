@@ -88,8 +88,14 @@ enum ShipStateListPoller {
                 }
                 defer { conn.close() }
 
-                // Consume hello line; bail if nothing arrives.
-                _ = conn.readLine()
+                let deadline = Date().addingTimeInterval(3.0)
+
+                // Consume hello line; bail if nothing arrives. This
+                // must be bounded: a stale socket can otherwise pin a
+                // worker forever and every poll spawns another one.
+                guard conn.readLine(deadline: deadline) != nil else {
+                    cont.resume(returning: nil); return
+                }
 
                 conn.sendLine(#"{"type":"ship-state-list"}"#)
 
@@ -98,9 +104,8 @@ enum ShipStateListPoller {
                 // (the daemon may replay ring-buffer events to
                 // pre-existing subscribers; we're a fresh socket and
                 // didn't subscribe, so this is just defensive).
-                let deadline = Date().addingTimeInterval(3.0)
                 while Date() < deadline {
-                    guard let line = conn.readLine(),
+                    guard let line = conn.readLine(deadline: deadline),
                           let data = line.data(using: .utf8),
                           let obj = try? JSONSerialization.jsonObject(with: data)
                                 as? [String: Any]

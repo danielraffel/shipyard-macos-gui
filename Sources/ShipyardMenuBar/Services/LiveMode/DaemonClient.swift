@@ -329,6 +329,7 @@ private final class Session {
 
     func start() async {
         await ensureDaemonRunning()
+        await restartDaemonIfTunnelDisabled()
         await connectSocket()
     }
 
@@ -387,6 +388,33 @@ private final class Session {
             await recoverHungDaemon(pid: pid)
             await spawnDaemon()
         }
+    }
+
+    /// v0.1.12 could leave behind a healthy-but-polling daemon because
+    /// the GUI spawned it without `SHIPYARD_ENABLE_TUNNEL=1`. If the
+    /// current daemon says its tunnel backend is explicitly inactive,
+    /// restart it once with the corrected environment before we
+    /// subscribe; otherwise the upgraded GUI would keep showing
+    /// "polling" until the user manually stopped the stale daemon.
+    private func restartDaemonIfTunnelDisabled() async {
+        guard let status = await statusSnapshot(),
+              status.tunnelURL == nil,
+              status.tunnelBackend.lowercased() == "inactive"
+        else { return }
+
+        // Avoid disrupting another live GUI/session. This should be
+        // zero before our own subscribe, but keep the guard defensive.
+        guard status.subscribers == 0 else { return }
+
+        _ = await runShipyard(args: ["daemon", "stop"], timeout: 2)
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            if case .absent = probeDaemon() {
+                break
+            }
+        }
+        cleanupStaleDaemonFiles()
+        await spawnDaemon()
     }
 
     /// Spawn a fresh daemon. Treats "already running" as success
@@ -554,7 +582,7 @@ private final class Session {
         let pathBytes = Array(path.utf8)
         let maxLen = MemoryLayout.size(ofValue: addr.sun_path) - 1
         guard pathBytes.count <= maxLen else { return false }
-        _ = withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
             ptr.withMemoryRebound(to: CChar.self, capacity: maxLen + 1) { cStr in
                 for (i, byte) in pathBytes.enumerated() {
                     cStr[i] = CChar(bitPattern: byte)
@@ -676,20 +704,55 @@ private final class Session {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: shipyardBinary)
             process.arguments = args
+            var environment = ProcessInfo.processInfo.environment
+            environment["SHIPYARD_ENABLE_TUNNEL"] = "1"
+            process.environment = environment
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe
+            let outputGroup = DispatchGroup()
+            let stateLock = NSLock()
+            var output = Data()
+            var timedOut = false
+
             do {
                 try process.run()
             } catch {
                 cont.resume(returning: (127, "failed to exec: \(error.localizedDescription)"))
                 return
             }
+
+            outputGroup.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                stateLock.lock()
+                output.append(data)
+                stateLock.unlock()
+                outputGroup.leave()
+            }
+
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
+                stateLock.lock()
+                timedOut = process.isRunning
+                stateLock.unlock()
+                guard process.isRunning else { return }
+                process.terminate()
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
+                    if process.isRunning {
+                        kill(process.processIdentifier, SIGKILL)
+                    }
+                }
+            }
+
             DispatchQueue.global(qos: .utility).async {
                 process.waitUntilExit()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                _ = outputGroup.wait(timeout: .now() + 1.0)
+                stateLock.lock()
+                let didTimeOut = timedOut
+                let data = output
+                stateLock.unlock()
                 cont.resume(returning: (
-                    process.terminationStatus,
+                    didTimeOut ? 124 : process.terminationStatus,
                     String(data: data, encoding: .utf8) ?? ""
                 ))
             }
@@ -720,7 +783,7 @@ final class DaemonConnection: @unchecked Sendable {
             Darwin.close(fd)
             return nil
         }
-        _ = withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
             ptr.withMemoryRebound(to: CChar.self, capacity: maxLen + 1) { cStr in
                 for (i, byte) in pathBytes.enumerated() {
                     cStr[i] = CChar(bitPattern: byte)
@@ -779,11 +842,29 @@ final class DaemonConnection: @unchecked Sendable {
 
     /// Blocking readline — called from a detached task, not main.
     func readLine() -> String? {
+        readLine(deadline: nil)
+    }
+
+    /// Deadline-bounded readline for one-shot IPC calls. Without this,
+    /// a daemon that accepts a socket but never replies can pin the
+    /// caller's worker thread forever.
+    func readLine(deadline: Date) -> String? {
+        readLine(deadline: Optional(deadline))
+    }
+
+    private func readLine(deadline: Date?) -> String? {
         while true {
             if let newlineIdx = buffer.firstIndex(of: 0x0a) {
                 let line = buffer[..<newlineIdx]
                 buffer = buffer[(newlineIdx + 1)...]
                 return String(data: line, encoding: .utf8) ?? ""
+            }
+            if let deadline {
+                let remaining = deadline.timeIntervalSinceNow
+                if remaining <= 0 { return nil }
+                let timeoutMs = Int32(max(1, min(remaining * 1000, Double(Int32.max))))
+                var pollFd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                guard Darwin.poll(&pollFd, 1, timeoutMs) > 0 else { return nil }
             }
             var chunk = [UInt8](repeating: 0, count: 65536)
             let count = chunk.withUnsafeMutableBufferPointer { ptr in
