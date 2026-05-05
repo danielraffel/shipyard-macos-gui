@@ -155,13 +155,21 @@ final class DaemonClient {
                 Task { @MainActor in self?.recordDelivery(event: event) }
             }
             session.onStatus = { [weak self] status in
-                Task { @MainActor in self?.apply(daemonStatus: status) }
+                Task { @MainActor in
+                    self?.apply(daemonStatus: status, allowMissingTunnelDowngrade: false)
+                }
             }
             session.onDisconnect = { [weak self] reason in
                 Task { @MainActor in self?.handleDisconnect(reason: reason) }
             }
             activeSession = session
             await session.start()
+            if cachedStatus?.tunnelURL == nil, let url = tailscale.funnelURL {
+                update(status: .live(tunnelURL: url, lastEventAt: lastEventAt))
+            }
+            if cachedStatus?.tunnelURL == nil, let status = await session.waitForStatusSnapshot() {
+                apply(daemonStatus: status, allowMissingTunnelDowngrade: true)
+            }
         }
 
         // While the daemon is connecting/polling we show a transient
@@ -221,10 +229,19 @@ final class DaemonClient {
 
     // MARK: - Internals
 
-    private func apply(daemonStatus: DaemonStatus) {
+    private func apply(
+        daemonStatus: DaemonStatus,
+        allowMissingTunnelDowngrade: Bool = true
+    ) {
         cachedStatus = daemonStatus
         if let url = daemonStatus.tunnelURL {
             update(status: .live(tunnelURL: url, lastEventAt: lastEventAt))
+        } else if !allowMissingTunnelDowngrade, case .live = status {
+            // The Rust daemon can accept IPC before Tailscale Funnel has
+            // produced a URL. Do not let that warm-up snapshot overwrite
+            // an optimistic live state; the bounded CLI status retry will
+            // either confirm the URL or downgrade after the warm-up window.
+            return
         } else {
             update(status: .polling(reason: .tunnelStartFailed(
                 daemonStatus.lastError ?? "daemon reported no tunnel"
@@ -326,6 +343,34 @@ private final class Session {
         readerTask = nil
         connection?.close()
         connection = nil
+    }
+
+    /// Seed the UI from the daemon's local status endpoint immediately
+    /// after connecting. The socket reader still owns live event updates,
+    /// but this avoids a visible "polling" limbo if the async status
+    /// frame is delayed behind replayed webhook backlog.
+    func waitForStatusSnapshot() async -> DaemonStatus? {
+        var latest: DaemonStatus?
+        for attempt in 0..<8 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            guard let status = await statusSnapshot() else { continue }
+            latest = status
+            if status.tunnelURL != nil { return status }
+        }
+        return latest
+    }
+
+    private func statusSnapshot() async -> DaemonStatus? {
+        let (exitCode, output) = await runShipyard(args: ["--json", "daemon", "status"], timeout: 2)
+        guard exitCode == 0,
+              let data = output.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        return DaemonWireDecoder.decodeStatus(obj)
     }
 
     private func ensureDaemonRunning() async {
@@ -586,8 +631,12 @@ private final class Session {
             return
         }
         connection = conn
-        conn.sendSubscribe()
+        // Ask for status before subscribing. Subscribing replays the
+        // daemon's event backlog, so a status request sent after it can
+        // sit behind many event frames and leave the UI saying "polling"
+        // despite a healthy live connection.
         conn.sendStatusRequest()
+        conn.sendSubscribe()
         readerTask = Task.detached { [weak self] in
             await self?.readLoop(conn: conn)
         }
