@@ -3,6 +3,11 @@
 All notable changes to shipyard-macos-gui are documented here. Each entry links
 to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/releases).
 
+<a id="v0112"></a>
+## [0.1.12] - 2026-05-05
+
+- codex/selected cli daemon paths ([#20](https://github.com/danielraffel/shipyard-macos-gui/pull/20))
+
 <a id="v0111"></a>
 ## [0.1.11] - 2026-05-04
 
@@ -40,6 +45,7 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 - fix: spinner stuck + empty-state collision + last-event counter ticks ([#7](https://github.com/danielraffel/shipyard-macos-gui/pull/7))
 
+[0.1.12]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.12
 [0.1.11]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.11
 [0.1.10]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.10
 [0.1.9]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.9
