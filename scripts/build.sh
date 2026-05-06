@@ -32,6 +32,7 @@ xcodebuild \
   -destination 'platform=macOS' \
   -derivedDataPath "$DERIVED" \
   -archivePath "$ARCHIVE" \
+  OTHER_CODE_SIGN_FLAGS="${SHIPYARD_ARCHIVE_CODE_SIGN_FLAGS:---timestamp=none}" \
   archive \
   | xcbeautify 2>/dev/null || true
 

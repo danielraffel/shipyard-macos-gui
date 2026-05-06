@@ -28,6 +28,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 REPO="danielraffel/shipyard-macos-gui"
+TIMESTAMP_URL="http://timestamp.apple.com/ts01"
 
 # ── creds (loaded silently) ─────────────────────────────────────────
 if [ -f "$HOME/.config/shipyard-macos-gui.env" ]; then
@@ -127,6 +128,27 @@ APP_PATH=$(find "$EXPORT_ROOT/out" -maxdepth 3 -name "*.app" -type d | head -1)
 [ -d "$APP_PATH" ] || { echo "ERROR: No .app produced by exportArchive" >&2; exit 1; }
 echo "  → $APP_PATH"
 
+# Xcode archive signing is allowed to skip secure timestamps because
+# codesign's implicit timestamp path is flaky from xcodebuild on some
+# macOS/Xcode combinations. Before notarization, re-sign the exported
+# payload explicitly through Apple's timestamp service so the shipped
+# app still carries Developer ID secure timestamps.
+SIGN_ID="Developer ID Application: Daniel Raffel (${TEAM_ID})"
+echo "→ Timestamp-signing exported .app"
+SPARKLE_FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/B"
+if [ -d "$SPARKLE_FRAMEWORK" ]; then
+  codesign --force --timestamp="$TIMESTAMP_URL" \
+    --options runtime \
+    --sign "$SIGN_ID" \
+    "$SPARKLE_FRAMEWORK"
+fi
+codesign --force --timestamp="$TIMESTAMP_URL" \
+  --options runtime \
+  --entitlements Resources/ShipyardMenuBar.entitlements \
+  --sign "$SIGN_ID" \
+  "$APP_PATH"
+codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
 # ── step 3: notarize the .app ───────────────────────────────────────
 echo "→ Notarizing .app"
 ./scripts/notarize.sh "$APP_PATH"
@@ -157,8 +179,8 @@ xcrun hdiutil create \
   "$DMG" >/dev/null
 
 echo "→ Signing DMG"
-codesign --force --timestamp \
-  --sign "Developer ID Application: Daniel Raffel (${TEAM_ID})" \
+codesign --force --timestamp="$TIMESTAMP_URL" \
+  --sign "$SIGN_ID" \
   "$DMG"
 codesign --verify --verbose "$DMG"
 
