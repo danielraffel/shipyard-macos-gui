@@ -5,6 +5,11 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 ## Unreleased
 
+<a id="v0119"></a>
+## [0.1.19] - 2026-05-06
+
+- Keep live mode from sticking on "polling" when the Rust daemon emits an early no-tunnel status frame during Tailscale Funnel warm-up.
+
 <a id="v0118"></a>
 ## [0.1.18] - 2026-05-06
 

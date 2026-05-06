@@ -180,6 +180,54 @@ final class DaemonWireDecoderTests: XCTestCase {
         XCTAssertTrue(reason.userFacing.contains("Polling continues"))
     }
 
+    func test_transientNoTunnelStatusDoesNotDowngradeDuringSocketWarmup() {
+        let status = DaemonStatus(
+            tunnelBackend: "inactive",
+            tunnelURL: nil,
+            subscribers: 1,
+            registeredRepos: ["org/repo"],
+            lastError: nil
+        )
+        let update = DaemonClient.statusUpdate(
+            daemonStatus: status,
+            lastEventAt: nil,
+            allowMissingTunnelDowngrade: false
+        )
+        XCTAssertNil(update)
+    }
+
+    func test_boundedStatusSnapshotCanDowngradeWhenTunnelNeverAppears() {
+        let status = DaemonStatus(
+            tunnelBackend: "inactive",
+            tunnelURL: nil,
+            subscribers: 1,
+            registeredRepos: ["org/repo"],
+            lastError: nil
+        )
+        let update = DaemonClient.statusUpdate(
+            daemonStatus: status,
+            lastEventAt: nil,
+            allowMissingTunnelDowngrade: true
+        )
+        XCTAssertEqual(update, .polling(reason: .tunnelStartFailed("daemon reported no tunnel")))
+    }
+
+    func test_statusUpdateSurfacesDaemonErrorsImmediately() {
+        let status = DaemonStatus(
+            tunnelBackend: "inactive",
+            tunnelURL: nil,
+            subscribers: 1,
+            registeredRepos: ["org/repo"],
+            lastError: "tailscale funnel failed"
+        )
+        let update = DaemonClient.statusUpdate(
+            daemonStatus: status,
+            lastEventAt: nil,
+            allowMissingTunnelDowngrade: false
+        )
+        XCTAssertEqual(update, .polling(reason: .tunnelStartFailed("tailscale funnel failed")))
+    }
+
     func test_runtimePathsDecodeRustPathsOutput() {
         let json = """
         {

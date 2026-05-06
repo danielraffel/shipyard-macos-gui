@@ -19,6 +19,12 @@ xcodegen generate
 
 DERIVED="$PROJECT_ROOT/build/DerivedData"
 ARCHIVE="$PROJECT_ROOT/build/ShipyardMenuBar-$CONFIG.xcarchive"
+for path in "$ARCHIVE" "$DERIVED"; do
+  if [ -e "$path" ]; then
+    chmod -R u+w "$path" 2>/dev/null || true
+    chflags -R nouchg,noschg,nohidden "$path" 2>/dev/null || true
+  fi
+done
 rm -rf "$ARCHIVE"
 # Wipe DerivedData too so stale compiled objects from a pre-bump
 # generation don't linger with the old MARKETING_VERSION baked in.

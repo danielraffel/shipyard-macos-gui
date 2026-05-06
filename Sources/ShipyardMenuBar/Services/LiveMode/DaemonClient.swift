@@ -240,26 +240,38 @@ final class DaemonClient {
         allowMissingTunnelDowngrade: Bool = true
     ) {
         cachedStatus = daemonStatus
+        if let nextStatus = Self.statusUpdate(
+            daemonStatus: daemonStatus,
+            lastEventAt: lastEventAt,
+            allowMissingTunnelDowngrade: allowMissingTunnelDowngrade
+        ) {
+            update(status: nextStatus)
+        }
+    }
+
+    nonisolated static func statusUpdate(
+        daemonStatus: DaemonStatus,
+        lastEventAt: Date?,
+        allowMissingTunnelDowngrade: Bool = true
+    ) -> LiveUpdateStatus? {
         if let error = daemonStatus.lastError {
             let reason = LiveUpdateStatus.PollingReason.serverStartFailed(error)
             if reason.isWebhookScopeMissing {
-                update(status: .polling(reason: reason))
-                return
+                return .polling(reason: reason)
             }
         }
         if let url = daemonStatus.tunnelURL {
-            update(status: .live(tunnelURL: url, lastEventAt: lastEventAt))
-        } else if !allowMissingTunnelDowngrade, case .live = status {
-            // The Rust daemon can accept IPC before Tailscale Funnel has
-            // produced a URL. Do not let that warm-up snapshot overwrite
-            // an optimistic live state; the bounded CLI status retry will
-            // either confirm the URL or downgrade after the warm-up window.
-            return
-        } else {
-            update(status: .polling(reason: .tunnelStartFailed(
-                daemonStatus.lastError ?? "daemon reported no tunnel"
-            )))
+            return .live(tunnelURL: url, lastEventAt: lastEventAt)
         }
+        if !allowMissingTunnelDowngrade && daemonStatus.lastError == nil {
+            // Socket status frames can arrive while the Rust daemon is
+            // still bringing up Tailscale Funnel. Only the bounded CLI
+            // snapshot path is allowed to make the final polling decision.
+            return nil
+        }
+        return .polling(reason: .tunnelStartFailed(
+            daemonStatus.lastError ?? "daemon reported no tunnel"
+        ))
     }
 
     private func handleDisconnect(reason: String) {
