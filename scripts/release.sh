@@ -137,8 +137,22 @@ SIGN_ID="Developer ID Application: Daniel Raffel (${TEAM_ID})"
 echo "→ Timestamp-signing exported .app"
 SPARKLE_FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/B"
 if [ -d "$SPARKLE_FRAMEWORK" ]; then
+  for nested in \
+    "$SPARKLE_FRAMEWORK/XPCServices/Downloader.xpc" \
+    "$SPARKLE_FRAMEWORK/XPCServices/Installer.xpc" \
+    "$SPARKLE_FRAMEWORK/Updater.app"
+  do
+    if [ -e "$nested" ]; then
+      codesign --force --timestamp="$TIMESTAMP_URL" \
+        --options runtime \
+        --preserve-metadata=identifier,entitlements,flags \
+        --sign "$SIGN_ID" \
+        "$nested"
+    fi
+  done
   codesign --force --timestamp="$TIMESTAMP_URL" \
     --options runtime \
+    --preserve-metadata=identifier,entitlements,flags \
     --sign "$SIGN_ID" \
     "$SPARKLE_FRAMEWORK"
 fi
