@@ -114,16 +114,21 @@ cat > "$EXPORT_ROOT/exportOptions.plist" <<EOF
 EOF
 
 echo "→ Exporting signed .app (Developer ID, hardened, timestamp)"
-xcrun xcodebuild -exportArchive \
-  -archivePath "$ARCHIVE" \
-  -exportPath "$EXPORT_ROOT/out" \
-  -exportOptionsPlist "$EXPORT_ROOT/exportOptions.plist" \
-  OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
-  >"$EXPORT_ROOT/export.log" 2>&1 || {
+if ! xcrun xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE" \
+    -exportPath "$EXPORT_ROOT/out" \
+    -exportOptionsPlist "$EXPORT_ROOT/exportOptions.plist" \
+    >"$EXPORT_ROOT/export.log" 2>&1; then
+  if grep -q "A timestamp was expected but was not found" "$EXPORT_ROOT/export.log"; then
+    echo "  (exportArchive hit Xcode timestamp bug; copying archived app for explicit re-sign)"
+    mkdir -p "$EXPORT_ROOT/out"
+    ditto "$ARCHIVE/Products/Applications/Shipyard.app" "$EXPORT_ROOT/out/Shipyard.app"
+  else
     echo "ERROR: exportArchive failed. Tail of log:" >&2
     tail -30 "$EXPORT_ROOT/export.log" >&2
     exit 1
-  }
+  fi
+fi
 
 APP_PATH=$(find "$EXPORT_ROOT/out" -maxdepth 3 -name "*.app" -type d | head -1)
 [ -d "$APP_PATH" ] || { echo "ERROR: No .app produced by exportArchive" >&2; exit 1; }
