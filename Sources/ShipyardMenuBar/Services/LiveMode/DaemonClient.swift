@@ -125,6 +125,7 @@ final class DaemonClient {
     private var activeSession: Session?
     private var lastEventAt: Date?
     private var cachedStatus: DaemonStatus?
+    private var tunnelStatusRefreshTask: Task<Void, Never>?
 
     /// Drive the client to a new state based on user prefs + Tailscale
     /// readiness. Called after mode toggles, Tailscale state changes,
@@ -171,6 +172,8 @@ final class DaemonClient {
             if cachedStatus?.tunnelURL == nil, let status = await session.waitForStatusSnapshot() {
                 apply(daemonStatus: status, allowMissingTunnelDowngrade: true)
             }
+        } else if cachedStatus?.tunnelURL == nil {
+            await refreshStatusFromActiveSession(allowMissingTunnelDowngrade: false)
         }
 
         // While the daemon is connecting/polling we show a transient
@@ -181,6 +184,7 @@ final class DaemonClient {
         } else if let s = cachedStatus, let url = s.tunnelURL {
             update(status: .live(tunnelURL: url, lastEventAt: lastEventAt))
         } else {
+            scheduleTunnelStatusRefresh()
             update(status: .polling(reason: nil)) // transitional
         }
     }
@@ -276,6 +280,8 @@ final class DaemonClient {
 
     private func handleDisconnect(reason: String) {
         activeSession = nil
+        tunnelStatusRefreshTask?.cancel()
+        tunnelStatusRefreshTask = nil
         // "daemon socket not available at X" / "daemon socket closed" /
         // "daemon exited" are all daemon-process-lifecycle failures,
         // not Tailscale Funnel failures. Attribute accordingly so the
@@ -287,6 +293,8 @@ final class DaemonClient {
     private func tearDown() async {
         if let session = activeSession {
             activeSession = nil
+            tunnelStatusRefreshTask?.cancel()
+            tunnelStatusRefreshTask = nil
             await session.stop()
         }
     }
@@ -294,7 +302,37 @@ final class DaemonClient {
     private func update(status newStatus: LiveUpdateStatus) {
         guard status != newStatus else { return }
         status = newStatus
+        if case .live = newStatus {
+            tunnelStatusRefreshTask?.cancel()
+            tunnelStatusRefreshTask = nil
+        }
         onStatusChange?(newStatus)
+    }
+
+    private func refreshStatusFromActiveSession(
+        allowMissingTunnelDowngrade: Bool
+    ) async {
+        guard let session = activeSession,
+              cachedStatus?.tunnelURL == nil,
+              let status = await session.statusSnapshot()
+        else { return }
+        apply(
+            daemonStatus: status,
+            allowMissingTunnelDowngrade: allowMissingTunnelDowngrade
+        )
+    }
+
+    private func scheduleTunnelStatusRefresh() {
+        guard tunnelStatusRefreshTask == nil else { return }
+        tunnelStatusRefreshTask = Task { @MainActor [weak self] in
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, self.activeSession != nil else { return }
+                await self.refreshStatusFromActiveSession(allowMissingTunnelDowngrade: false)
+                if case .live = self.status { break }
+            }
+            self?.tunnelStatusRefreshTask = nil
+        }
     }
 
     private static func resolveShipyardBinary() -> String? {
@@ -391,7 +429,7 @@ private final class Session {
         return latest
     }
 
-    private func statusSnapshot() async -> DaemonStatus? {
+    func statusSnapshot() async -> DaemonStatus? {
         let (exitCode, output) = await runShipyard(args: ["--json", "daemon", "status"], timeout: 2)
         guard exitCode == 0,
               let data = output.data(using: .utf8),

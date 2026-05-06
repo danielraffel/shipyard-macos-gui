@@ -5,6 +5,11 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 ## Unreleased
 
+<a id="v0120"></a>
+## [0.1.20] - 2026-05-06
+
+- Refresh local daemon status after live-mode warm-up so the header switches to live once Tailscale Funnel is ready, even if the first socket status frame was inactive.
+
 <a id="v0119"></a>
 ## [0.1.19] - 2026-05-06
 
