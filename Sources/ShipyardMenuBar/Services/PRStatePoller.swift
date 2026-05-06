@@ -16,18 +16,37 @@ struct PRState: Equatable {
 enum PRStatePoller {
     static func fetch(repo: String, pr: Int) async -> PRState? {
         guard let gh = resolveGH() else { return nil }
+        guard let path = apiPath(repo: repo, pr: pr) else { return nil }
         let raw = await runGHCapturing(executable: gh, args: [
-            "pr", "view", "\(pr)", "--repo", repo,
-            "--json", "state,mergedAt,closedAt",
+            "api", path,
+            "--jq", "{state: .state, merged_at: .merged_at, closed_at: .closed_at}",
         ])
+        return decodeRESTPayload(raw)
+    }
+
+    static func apiPath(repo: String, pr: Int) -> String? {
+        let parts = repo.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty, pr > 0 else {
+            return nil
+        }
+        return "repos/\(parts[0])/\(parts[1])/pulls/\(pr)"
+    }
+
+    static func decodeRESTPayload(_ raw: String) -> PRState? {
         guard !raw.isEmpty, let data = raw.data(using: .utf8) else { return nil }
         struct Raw: Decodable {
             let state: String?
             let mergedAt: String?
             let closedAt: String?
+
+            enum CodingKeys: String, CodingKey {
+                case state
+                case mergedAt = "merged_at"
+                case closedAt = "closed_at"
+            }
         }
         guard let r = try? JSONDecoder().decode(Raw.self, from: data) else { return nil }
-        let state = r.state ?? "UNKNOWN"
+        let state = (r.state ?? "UNKNOWN").uppercased()
         let merged = (state == "MERGED") || (r.mergedAt != nil && !(r.mergedAt?.isEmpty ?? true))
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

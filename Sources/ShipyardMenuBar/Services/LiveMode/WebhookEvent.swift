@@ -15,6 +15,9 @@ enum WebhookEvent: Equatable {
     /// `pull_request` event — open/closed/merged transitions. Drives
     /// the merged/closed pill + removes ships from the list.
     case pullRequest(PullRequestPayload)
+    /// Daemon-side terminal ship-state event. Emitted when the Rust
+    /// daemon archives local state after a closed PR webhook.
+    case stateArchived(StateArchivedPayload)
     /// Anything else we chose not to model. Callers typically ignore.
     case unhandled(type: String)
 
@@ -50,6 +53,13 @@ enum WebhookEvent: Equatable {
         let merged: Bool
         let mergedAt: String?
         let closedAt: String?
+    }
+
+    struct StateArchivedPayload: Equatable {
+        let pr: Int
+        let repo: String
+        let source: String?
+        let message: String?
     }
 }
 

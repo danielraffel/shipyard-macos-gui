@@ -301,6 +301,8 @@ final class AppStore: ObservableObject {
             mergeWebhookJob(p)
         case .pullRequest(let p):
             mergeWebhookPullRequest(p)
+        case .stateArchived(let p):
+            mergeStateArchived(p)
         case .unhandled:
             break
         }
@@ -444,6 +446,27 @@ final class AppStore: ObservableObject {
             mergedAt: parse(p.mergedAt),
             closedAt: parse(p.closedAt)
         )
+    }
+
+    private func mergeStateArchived(_ p: WebhookEvent.StateArchivedPayload) {
+        let key = prKey(repo: p.repo, pr: p.pr)
+        if prStateByKey[key] == nil {
+            prStateByKey[key] = PRState(
+                state: "CLOSED",
+                isMerged: false,
+                mergedAt: nil,
+                closedAt: Date()
+            )
+        }
+        lastRawSnapshot.removeAll { ship in
+            ship.prNumber == p.pr && (p.repo.isEmpty || ship.repo == p.repo)
+        }
+        ships.removeAll { ship in
+            ship.prNumber == p.pr && (p.repo.isEmpty || ship.repo == p.repo)
+        }
+        prExpansionState.removeValue(forKey: p.pr)
+        reapplyAutoClearFilter()
+        detectBadgeTransition()
     }
 
     @Published var showGitHubActions: Bool = UserDefaults.standard.object(forKey: Keys.showGitHubActions) as? Bool ?? true {
@@ -1452,13 +1475,11 @@ final class AppStore: ObservableObject {
     @Published var prStateByKey: [String: PRState] = [:]
     private var inflightPRStateFetches: Set<String> = []
     /// Last attempt timestamp per PR key — guards against retry storms
-    /// when `gh pr view` fails (e.g. during a GitHub rate-limit window).
-    /// Without this, every applySnapshot re-fires a `gh pr view` for
-    /// every un-cached PR, and NDJSON can emit snapshots several times
-    /// per second. With a 60s cooldown, failed fetches back off even
-    /// when the snapshot stream is noisy.
+    /// when the GitHub fallback fails (e.g. during a rate-limit window).
+    /// With a five-minute cooldown, visible cards can still self-heal
+    /// stale PR state without draining GitHub's hourly API budget.
     private var lastPRStateFetchAttempt: [String: Date] = [:]
-    private let prStateFetchCooldown: TimeInterval = 60
+    private let prStateFetchCooldown: TimeInterval = 5 * 60
     private var prStateFetchTasks: [String: Task<Void, Never>] = [:]
     private var pendingPRStateFetches: [Ship] = []
     private let maxConcurrentPRStateFetches = 1
@@ -1471,6 +1492,7 @@ final class AppStore: ObservableObject {
 
     func fetchPRStateIfNeeded(for ship: Ship) {
         guard deferredStartupWorkStarted else { return }
+        if githubRateLimit?.isExceeded == true { return }
         let key = prKey(repo: ship.repo, pr: ship.prNumber)
         if prStateByKey[key] != nil { return }
         if inflightPRStateFetches.contains(key) { return }

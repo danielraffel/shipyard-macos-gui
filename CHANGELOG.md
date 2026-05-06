@@ -5,6 +5,13 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 ## Unreleased
 
+<a id="v0118"></a>
+## [0.1.18] - 2026-05-06
+
+- Remove stale merged PR rows immediately when the Rust Shipyard daemon archives local ship-state from `pull_request.closed` webhooks.
+- Replace the PR-state fallback with the lower-cost GitHub REST pulls endpoint and a longer retry cooldown to avoid GraphQL pressure.
+- Keep the release script from mutating `CHANGELOG.md` after a successful DMG publish.
+
 <a id="v0117"></a>
 ## [0.1.17] - 2026-05-06
 
@@ -78,6 +85,7 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 - fix: spinner stuck + empty-state collision + last-event counter ticks ([#7](https://github.com/danielraffel/shipyard-macos-gui/pull/7))
 
+[0.1.18]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.18
 [0.1.17]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.17
 [0.1.16]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.16
 [0.1.15]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.15

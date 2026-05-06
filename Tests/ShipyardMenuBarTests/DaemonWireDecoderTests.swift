@@ -83,6 +83,25 @@ final class DaemonWireDecoderTests: XCTestCase {
         XCTAssertTrue(p.merged)
     }
 
+    func test_stateArchived_decodesTerminalShipStateEvent() {
+        let obj: [String: Any] = [
+            "kind": "state-archived",
+            "payload": [
+                "pr": 581,
+                "repo": "org/repo",
+                "source": "pull_request.closed",
+                "message": "PR #581 merged; archived local ship state.",
+            ],
+        ]
+        guard case .stateArchived(let p) = DaemonWireDecoder.decodeEvent(obj) else {
+            XCTFail("expected stateArchived")
+            return
+        }
+        XCTAssertEqual(p.pr, 581)
+        XCTAssertEqual(p.repo, "org/repo")
+        XCTAssertEqual(p.source, "pull_request.closed")
+    }
+
     func test_unhandledKindFallsThrough() {
         let obj: [String: Any] = [
             "kind": "unhandled",

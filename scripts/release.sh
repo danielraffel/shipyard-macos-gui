@@ -482,15 +482,13 @@ else
   fi
 fi
 
-# ── step 9: refresh CHANGELOG.md in the repo (best-effort) ──────────
-# The post-tag hook in .shipyard/config.toml would do this via a bot
-# push, but we also refresh locally so a follow-up commit captures it
-# if the bot path isn't wired up yet.
-if [ -n "$SHIPYARD_BIN" ] && [ -f "$PROJECT_ROOT/.shipyard/config.toml" ]; then
-  echo "→ Regenerating CHANGELOG.md"
-  "$SHIPYARD_BIN" changelog regenerate >/dev/null 2>&1 || \
-    echo "  (changelog regenerate skipped — non-fatal)"
-fi
+# ── step 9: leave repository docs untouched ─────────────────────────
+# Release notes are already generated above from the tag and uploaded
+# to GitHub/Sparkle. Do not run `shipyard changelog regenerate` here:
+# this repo's changelog is manually curated, and a post-release
+# mutation can leave the checkout dirty or accidentally drop recent
+# entries after a successful publish.
+echo "→ Leaving CHANGELOG.md unchanged"
 
 echo
 echo "✓ Done"

@@ -909,6 +909,8 @@ enum DaemonWireDecoder {
             return decodeWorkflowJob(payload)
         case "pull_request":
             return decodePullRequest(payload)
+        case "state-archived":
+            return decodeStateArchived(payload)
         case "unhandled":
             return .unhandled(type: (obj["type"] as? String) ?? "unhandled")
         default:
@@ -980,6 +982,17 @@ enum DaemonWireDecoder {
             closedAt: p["closed_at"] as? String
         )
         return .pullRequest(payload)
+    }
+
+    private static func decodeStateArchived(_ p: [String: Any]) -> WebhookEvent? {
+        guard let pr = p["pr"] as? Int else { return nil }
+        let payload = WebhookEvent.StateArchivedPayload(
+            pr: pr,
+            repo: (p["repo"] as? String) ?? "",
+            source: p["source"] as? String,
+            message: p["message"] as? String
+        )
+        return .stateArchived(payload)
     }
 }
 
