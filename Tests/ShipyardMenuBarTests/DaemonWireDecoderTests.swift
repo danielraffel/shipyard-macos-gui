@@ -172,12 +172,67 @@ final class DaemonWireDecoderTests: XCTestCase {
         )
         XCTAssertTrue(reason.isWebhookScopeMissing)
         XCTAssertTrue(reason.shouldWarn)
-        XCTAssertEqual(reason.headerLabel, "polling · hook auth")
+        XCTAssertEqual(reason.headerLabel, "hook auth")
         XCTAssertEqual(
             LiveUpdateStatus.PollingReason.webhookScopeCommand,
             "gh auth refresh -h github.com -s admin:repo_hook"
         )
-        XCTAssertTrue(reason.userFacing.contains("Polling continues"))
+        XCTAssertTrue(reason.userFacing.contains("polling is paused"))
+    }
+
+    func test_githubPollingPolicyPausesDuringWebhookAuthBlock() {
+        let reason = LiveUpdateStatus.PollingReason.serverStartFailed(
+            "GitHub webhook management needs admin:repo_hook"
+        )
+        let status = LiveUpdateStatus.polling(reason: reason)
+
+        XCTAssertTrue(status.blocksGitHubAPIPolling)
+        XCTAssertTrue(status.usesConservativeGitHubPollingCadence)
+        XCTAssertEqual(AppStore.pollIntervalNanoseconds(for: status), 300_000_000_000)
+        XCTAssertFalse(AppStore.shouldPollGitHubActions(
+            showGitHubActions: true,
+            liveStartupPending: false,
+            liveStatus: status,
+            rateLimitExceeded: false
+        ))
+    }
+
+    func test_githubPollingPolicySkipsStartupAndRateLimitExceeded() {
+        let status = LiveUpdateStatus.polling(reason: nil)
+        XCTAssertFalse(AppStore.shouldPollGitHubActions(
+            showGitHubActions: true,
+            liveStartupPending: true,
+            liveStatus: status,
+            rateLimitExceeded: false
+        ))
+        XCTAssertFalse(AppStore.shouldPollGitHubActions(
+            showGitHubActions: true,
+            liveStartupPending: false,
+            liveStatus: status,
+            rateLimitExceeded: true
+        ))
+        XCTAssertTrue(AppStore.shouldPollGitHubActions(
+            showGitHubActions: true,
+            liveStartupPending: false,
+            liveStatus: status,
+            rateLimitExceeded: false
+        ))
+    }
+
+    func test_githubPollingPolicyUsesConservativeCadenceWhenLive() {
+        let status = LiveUpdateStatus.live(
+            tunnelURL: URL(string: "https://shipyard.example")!,
+            lastEventAt: nil
+        )
+        XCTAssertFalse(status.blocksGitHubAPIPolling)
+        XCTAssertTrue(status.usesConservativeGitHubPollingCadence)
+        XCTAssertEqual(AppStore.pollIntervalNanoseconds(for: status), 300_000_000_000)
+        XCTAssertTrue(AppStore.shouldPollGitHubActions(
+            showGitHubActions: true,
+            liveStartupPending: false,
+            liveStatus: status,
+            rateLimitExceeded: false
+        ))
     }
 
     func test_transientNoTunnelStatusDoesNotDowngradeDuringSocketWarmup() {
@@ -226,6 +281,26 @@ final class DaemonWireDecoderTests: XCTestCase {
             allowMissingTunnelDowngrade: false
         )
         XCTAssertEqual(update, .polling(reason: .tunnelStartFailed("tailscale funnel failed")))
+    }
+
+    func test_statusUpdateTreatsWebhookAuthErrorAsAuthBlockedEvenWithTunnelURL() {
+        let status = DaemonStatus(
+            tunnelBackend: "tailscale",
+            tunnelURL: URL(string: "https://shipyard.example"),
+            subscribers: 1,
+            registeredRepos: [],
+            lastError: "GitHub webhook management needs admin:repo_hook"
+        )
+        let update = DaemonClient.statusUpdate(
+            daemonStatus: status,
+            lastEventAt: nil,
+            allowMissingTunnelDowngrade: false
+        )
+        XCTAssertEqual(
+            update,
+            .polling(reason: .serverStartFailed("GitHub webhook management needs admin:repo_hook"))
+        )
+        XCTAssertTrue(update?.blocksGitHubAPIPolling == true)
     }
 
     func test_runtimePathsDecodeRustPathsOutput() {

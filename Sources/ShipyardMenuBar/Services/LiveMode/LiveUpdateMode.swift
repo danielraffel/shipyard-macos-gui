@@ -50,6 +50,29 @@ enum LiveUpdateStatus: Equatable {
     /// most recent successfully-validated delivery.
     case live(tunnelURL: URL, lastEventAt: Date?)
 
+    /// True when the GUI should avoid GitHub API polling because live
+    /// mode needs one-time webhook authorization. Namespace polling is
+    /// still safe because it uses `nsc`, not the GitHub API.
+    var blocksGitHubAPIPolling: Bool {
+        if case .polling(let reason) = self, reason?.isWebhookScopeMissing == true {
+            return true
+        }
+        return false
+    }
+
+    /// Use the low reconciliation cadence when webhooks are active or
+    /// when live mode is auth-blocked. The latter prevents a failed
+    /// webhook registration from silently turning into 60s GitHub API
+    /// polling.
+    var usesConservativeGitHubPollingCadence: Bool {
+        switch self {
+        case .live:
+            return true
+        case .polling(let reason):
+            return reason?.isWebhookScopeMissing == true
+        }
+    }
+
     enum PollingReason: Equatable {
         case userDisabled
         case tailscaleNotInstalled
@@ -107,14 +130,14 @@ enum LiveUpdateStatus: Equatable {
 
         var headerLabel: String {
             if isWebhookScopeMissing {
-                return "polling · hook auth"
+                return "hook auth"
             }
             return "polling"
         }
 
         var userFacing: String {
             if isWebhookScopeMissing {
-                return "GitHub webhook management needs one-time authorization. Polling continues; live webhooks will resume after granting the scope."
+                return "GitHub webhook management needs one-time authorization. GitHub API polling is paused to protect your rate limit; live webhooks will resume after granting the scope and restarting the daemon."
             }
             switch self {
             case .userDisabled:

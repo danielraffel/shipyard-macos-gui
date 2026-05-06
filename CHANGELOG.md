@@ -5,6 +5,11 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 ## Unreleased
 
+<a id="v0121"></a>
+## [0.1.21] - 2026-05-06
+
+- Pause GitHub API polling while live mode is blocked on `admin:repo_hook` authorization, instead of silently falling back to 60s polling and burning rate limit.
+
 <a id="v0120"></a>
 ## [0.1.20] - 2026-05-06
 

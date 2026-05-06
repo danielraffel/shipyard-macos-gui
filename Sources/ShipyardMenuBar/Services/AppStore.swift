@@ -262,8 +262,7 @@ final class AppStore: ObservableObject {
             repos: Set(ships.map(\.repo)).filter { !$0.isEmpty }.union(knownRepos)
         )
         await MainActor.run {
-            self.liveStatus = self.liveController.status
-            self.liveStartupPending = false
+            self.applyLiveStatus(self.liveController.status)
         }
     }
 
@@ -753,8 +752,7 @@ final class AppStore: ObservableObject {
         }
         liveController.onStatusChange = { [weak self] newStatus in
             Task { @MainActor in
-                self?.liveStatus = newStatus
-                self?.liveStartupPending = false
+                self?.applyLiveStatus(newStatus)
             }
         }
         liveController.onEvent = { [weak self] event in
@@ -766,6 +764,14 @@ final class AppStore: ObservableObject {
             scheduleDeferredLiveStartup()
         }
         syncLaunchAtLoginFromSystem()
+    }
+
+    private func applyLiveStatus(_ newStatus: LiveUpdateStatus) {
+        liveStatus = newStatus
+        liveStartupPending = false
+        if newStatus.blocksGitHubAPIPolling {
+            cancelGitHubDetailWork()
+        }
     }
 
     /// Called by the status-item host after the popover is visible.
@@ -1249,7 +1255,12 @@ final class AppStore: ObservableObject {
         stopGitHubPolling()
         githubPollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.pollGitHubOnce()
+                let shouldPoll = await MainActor.run {
+                    self?.shouldPollGitHubActionsNow ?? false
+                }
+                if shouldPoll {
+                    await self?.pollGitHubOnce()
+                }
                 let interval = await MainActor.run {
                     self?.pollIntervalNanoseconds ?? 60_000_000_000
                 }
@@ -1263,8 +1274,35 @@ final class AppStore: ObservableObject {
     /// heavy lifting; poll is just a reconciler for missed events).
     @MainActor
     var pollIntervalNanoseconds: UInt64 {
-        if case .live = liveStatus { return 300_000_000_000 }
+        Self.pollIntervalNanoseconds(for: liveStatus)
+    }
+
+    nonisolated static func pollIntervalNanoseconds(for status: LiveUpdateStatus) -> UInt64 {
+        if status.usesConservativeGitHubPollingCadence { return 300_000_000_000 }
         return 60_000_000_000
+    }
+
+    @MainActor
+    var shouldPollGitHubActionsNow: Bool {
+        Self.shouldPollGitHubActions(
+            showGitHubActions: showGitHubActions,
+            liveStartupPending: liveStartupPending,
+            liveStatus: liveStatus,
+            rateLimitExceeded: githubRateLimit?.isExceeded == true
+        )
+    }
+
+    nonisolated static func shouldPollGitHubActions(
+        showGitHubActions: Bool,
+        liveStartupPending: Bool,
+        liveStatus: LiveUpdateStatus,
+        rateLimitExceeded: Bool
+    ) -> Bool {
+        guard showGitHubActions else { return false }
+        guard !liveStartupPending else { return false }
+        guard !liveStatus.blocksGitHubAPIPolling else { return false }
+        guard !rateLimitExceeded else { return false }
+        return true
     }
 
     func stopGitHubPolling() {
@@ -1406,6 +1444,7 @@ final class AppStore: ObservableObject {
     /// fresh fetch when they explicitly ask for detail.
     func fetchRunsForShipOnDemand(_ ship: Ship, force: Bool = false) {
         guard deferredStartupWorkStarted || force else { return }
+        guard shouldPollGitHubActionsNow else { return }
         guard showGitHubActions,
               !ship.repo.isEmpty,
               !ship.branch.isEmpty else { return }
@@ -1492,7 +1531,7 @@ final class AppStore: ObservableObject {
 
     func fetchPRStateIfNeeded(for ship: Ship) {
         guard deferredStartupWorkStarted else { return }
-        if githubRateLimit?.isExceeded == true { return }
+        guard shouldPollGitHubActionsNow else { return }
         let key = prKey(repo: ship.repo, pr: ship.prNumber)
         if prStateByKey[key] != nil { return }
         if inflightPRStateFetches.contains(key) { return }
@@ -1565,7 +1604,7 @@ final class AppStore: ObservableObject {
 
     func fetchJobsIfNeeded(for run: GitHubRun) {
         guard deferredStartupWorkStarted else { return }
-        guard showGitHubActions else { return }
+        guard shouldPollGitHubActionsNow else { return }
         if jobsByRunId[run.id] != nil { return }
         if inflightJobFetches.contains(run.id) { return }
         if pendingJobFetches.contains(where: { $0.id == run.id }) { return }
@@ -1661,7 +1700,7 @@ final class AppStore: ObservableObject {
     }
 
     func fetchJobsForNamespaceCandidates() {
-        guard deferredStartupWorkStarted, showGitHubActions else { return }
+        guard deferredStartupWorkStarted, shouldPollGitHubActionsNow else { return }
         let instanceIDs = Set(namespaceInstances.map(\.id))
         guard !instanceIDs.isEmpty else { return }
 
