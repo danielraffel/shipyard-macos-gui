@@ -38,12 +38,11 @@ enum GitHubActionsPoller {
     }
 
     private static func resolveGH() -> String? {
-        let candidates = [
+        ShipyardProcessEnvironment.findExecutable(named: "gh", candidates: [
             "/opt/homebrew/bin/gh",
             "/usr/local/bin/gh",
             "/usr/bin/gh",
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        ])
     }
 
     /// Fetch the jobs for a specific run. Used to derive runner

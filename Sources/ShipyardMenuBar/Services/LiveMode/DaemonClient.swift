@@ -62,6 +62,7 @@ enum DaemonRuntimePathResolver {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shipyardBinary)
         process.arguments = ["--json", "paths"]
+        ShipyardProcessEnvironment.configure(process)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -304,7 +305,10 @@ final class DaemonClient {
             NSHomeDirectory() + "/.pulp/bin/shipyard",
             NSHomeDirectory() + "/.local/bin/shipyard",
         ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        return ShipyardProcessEnvironment.findExecutable(
+            named: "shipyard",
+            candidates: candidates
+        )
     }
 
     // MARK: - Socket path
@@ -716,9 +720,10 @@ private final class Session {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: shipyardBinary)
             process.arguments = args
-            var environment = ProcessInfo.processInfo.environment
-            environment["SHIPYARD_ENABLE_TUNNEL"] = "1"
-            process.environment = environment
+            ShipyardProcessEnvironment.configure(
+                process,
+                extra: ["SHIPYARD_ENABLE_TUNNEL": "1"]
+            )
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe

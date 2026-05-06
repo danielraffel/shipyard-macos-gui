@@ -53,7 +53,11 @@ enum TailscaleProbe {
     /// Find the first `tailscale` binary present on disk, or nil.
     static func resolveBinary(candidates: [String] = candidateBinaries,
                              fileManager: FileManager = .default) -> String? {
-        candidates.first { fileManager.isExecutableFile(atPath: $0) }
+        ShipyardProcessEnvironment.findExecutable(
+            named: "tailscale",
+            candidates: candidates,
+            fileManager: fileManager
+        )
     }
 
     /// Parse `tailscale status --json` output into a `TailscaleStatus`.
@@ -121,6 +125,7 @@ enum TailscaleProbe {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: binary)
             process.arguments = args
+            ShipyardProcessEnvironment.configure(process)
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = Pipe()

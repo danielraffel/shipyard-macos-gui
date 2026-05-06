@@ -46,7 +46,10 @@ enum PRStatePoller {
     }
 
     private static func resolveGH() -> String? {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
-            .first { FileManager.default.isExecutableFile(atPath: $0) }
+        ShipyardProcessEnvironment.findExecutable(named: "gh", candidates: [
+            "/opt/homebrew/bin/gh",
+            "/usr/local/bin/gh",
+            "/usr/bin/gh",
+        ])
     }
 }

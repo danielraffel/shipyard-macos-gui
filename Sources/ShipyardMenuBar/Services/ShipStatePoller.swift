@@ -160,6 +160,7 @@ func runShipyardCapturingStdout(binary: String, args: [String]) async -> String 
             let process = Process()
             process.executableURL = URL(fileURLWithPath: binary)
             process.arguments = args
+            ShipyardProcessEnvironment.configure(process)
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = Pipe()

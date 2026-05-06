@@ -171,8 +171,11 @@ struct LogPaneView: View {
     }
 
     private func resolveGH() -> String? {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
-            .first { FileManager.default.isExecutableFile(atPath: $0) }
+        ShipyardProcessEnvironment.findExecutable(named: "gh", candidates: [
+            "/opt/homebrew/bin/gh",
+            "/usr/local/bin/gh",
+            "/usr/bin/gh",
+        ])
     }
 
     /// Parse the JSON output of `gh run view --json status,conclusion`

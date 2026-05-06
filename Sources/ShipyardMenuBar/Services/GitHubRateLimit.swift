@@ -52,8 +52,11 @@ enum GitHubRateLimitPoller {
     }
 
     private static func resolveGH() -> String? {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
-            .first { FileManager.default.isExecutableFile(atPath: $0) }
+        ShipyardProcessEnvironment.findExecutable(named: "gh", candidates: [
+            "/opt/homebrew/bin/gh",
+            "/usr/local/bin/gh",
+            "/usr/bin/gh",
+        ])
     }
 
     private static func runCapturing(
@@ -64,6 +67,7 @@ enum GitHubRateLimitPoller {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = args
+            ShipyardProcessEnvironment.configure(process)
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = Pipe()

@@ -18,6 +18,7 @@ func runGHCapturing(
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: executable)
                 process.arguments = args
+                ShipyardProcessEnvironment.configure(process)
                 let pipe = Pipe()
                 process.standardOutput = pipe
                 process.standardError = Pipe()

@@ -1057,12 +1057,13 @@ final class AppStore: ObservableObject {
             NSHomeDirectory() + "/.pulp/bin/shipyard",
             NSHomeDirectory() + "/.local/bin/shipyard",
         ]
-        for candidate in candidates {
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                cliBinaryResolved = candidate
-                cliBinaryError = nil
-                return
-            }
+        if let candidate = ShipyardProcessEnvironment.findExecutable(
+            named: "shipyard",
+            candidates: candidates
+        ) {
+            cliBinaryResolved = candidate
+            cliBinaryError = nil
+            return
         }
         cliBinaryResolved = nil
         cliBinaryError = "shipyard binary not found. Set path in Settings or install the CLI first."
@@ -1792,8 +1793,11 @@ final class AppStore: ObservableObject {
         }
     }
     private func resolveGHBinary() -> String? {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
-            .first { FileManager.default.isExecutableFile(atPath: $0) }
+        ShipyardProcessEnvironment.findExecutable(named: "gh", candidates: [
+            "/opt/homebrew/bin/gh",
+            "/usr/local/bin/gh",
+            "/usr/bin/gh",
+        ])
     }
 }
 

@@ -143,14 +143,13 @@ enum NamespaceActivityPoller {
 
     private static func resolveNSC() -> String? {
         let home = NSHomeDirectory()
-        let candidates = [
+        return ShipyardProcessEnvironment.findExecutable(named: "nsc", candidates: [
             "/opt/homebrew/bin/nsc",
             "/usr/local/bin/nsc",
             "/usr/bin/nsc",
             home + "/.local/bin/nsc",
             home + "/.pulp/bin/nsc",
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        ])
     }
 
     private struct RawInstance: Decodable {
