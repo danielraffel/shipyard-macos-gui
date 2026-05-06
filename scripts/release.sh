@@ -144,6 +144,7 @@ echo "→ Timestamp-signing exported .app"
 SPARKLE_FRAMEWORK="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/B"
 if [ -d "$SPARKLE_FRAMEWORK" ]; then
   for nested in \
+    "$SPARKLE_FRAMEWORK/Autoupdate" \
     "$SPARKLE_FRAMEWORK/XPCServices/Downloader.xpc" \
     "$SPARKLE_FRAMEWORK/XPCServices/Installer.xpc" \
     "$SPARKLE_FRAMEWORK/Updater.app"
