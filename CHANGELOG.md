@@ -5,6 +5,12 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 ## Unreleased
 
+<a id="v0116"></a>
+## [0.1.16] - 2026-05-05
+
+- Fix Finder and login-item launches so Shipyard subprocesses see user CLI paths for `gh`, `nsc`, Homebrew, Tailscale, and `~/.local/bin`.
+- Keep live-mode daemon startup, Doctor, GitHub polling, Namespace polling, and log helpers on the same augmented CLI environment.
+
 <a id="v0115"></a>
 ## [0.1.15] - 2026-05-05
 
@@ -66,6 +72,7 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 - fix: spinner stuck + empty-state collision + last-event counter ticks ([#7](https://github.com/danielraffel/shipyard-macos-gui/pull/7))
 
+[0.1.16]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.16
 [0.1.15]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.15
 [0.1.14]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.14
 [0.1.13]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.13
