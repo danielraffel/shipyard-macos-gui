@@ -23,7 +23,7 @@ settings:
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Developer ID Application: Daniel Raffel (95CX6P84C4)"
     ENABLE_HARDENED_RUNTIME: YES
-    OTHER_CODE_SIGN_FLAGS: "--timestamp"
+    OTHER_CODE_SIGN_FLAGS: "--timestamp=http://timestamp.apple.com/ts01"
     SWIFT_STRICT_CONCURRENCY: minimal
     CLANG_ENABLE_MODULES: YES
     ENABLE_USER_SCRIPT_SANDBOXING: NO
