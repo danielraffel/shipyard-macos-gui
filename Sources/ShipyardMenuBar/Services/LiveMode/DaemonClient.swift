@@ -407,7 +407,7 @@ private final class Session {
     }
 
     /// v0.1.12 could leave behind a healthy-but-polling daemon because
-    /// the GUI spawned it without `SHIPYARD_ENABLE_TUNNEL=1`. If the
+    /// the GUI spawned it without the live-tunnel opt-in env vars. If the
     /// current daemon says its tunnel backend is explicitly inactive,
     /// restart it once with the corrected environment before we
     /// subscribe; otherwise the upgraded GUI would keep showing
@@ -722,7 +722,10 @@ private final class Session {
             process.arguments = args
             ShipyardProcessEnvironment.configure(
                 process,
-                extra: ["SHIPYARD_ENABLE_TUNNEL": "1"]
+                extra: [
+                    "SHIPYARD_ENABLE_TUNNEL": "1",
+                    "SHIPYARD_RUST_ENABLE_TUNNEL": "1",
+                ]
             )
             let pipe = Pipe()
             process.standardOutput = pipe

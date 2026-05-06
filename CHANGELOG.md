@@ -5,6 +5,12 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 ## Unreleased
 
+<a id="v0117"></a>
+## [0.1.17] - 2026-05-06
+
+- Fix live-mode daemon launch against Rust Shipyard builds that require `SHIPYARD_RUST_ENABLE_TUNNEL`, while keeping compatibility with released `SHIPYARD_ENABLE_TUNNEL` builds.
+- Verified a patched GUI launch subscribes to the daemon and brings up Tailscale Funnel instead of replacing it with an inactive polling daemon.
+
 <a id="v0116"></a>
 ## [0.1.16] - 2026-05-05
 
@@ -72,6 +78,7 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 - fix: spinner stuck + empty-state collision + last-event counter ticks ([#7](https://github.com/danielraffel/shipyard-macos-gui/pull/7))
 
+[0.1.17]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.17
 [0.1.16]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.16
 [0.1.15]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.15
 [0.1.14]: https://github.com/danielraffel/shipyard-macos-gui/releases/tag/v0.1.14

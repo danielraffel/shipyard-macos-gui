@@ -26,11 +26,15 @@ final class ProcessEnvironmentTests: XCTestCase {
     func test_augmentedEnvironmentPreservesExtraValues() {
         let environment = ShipyardProcessEnvironment.augmented(
             from: ["PATH": "/usr/bin", "HOME": "/tmp/home"],
-            extra: ["SHIPYARD_ENABLE_TUNNEL": "1"]
+            extra: [
+                "SHIPYARD_ENABLE_TUNNEL": "1",
+                "SHIPYARD_RUST_ENABLE_TUNNEL": "1",
+            ]
         )
 
         XCTAssertEqual(environment["HOME"], "/tmp/home")
         XCTAssertEqual(environment["SHIPYARD_ENABLE_TUNNEL"], "1")
+        XCTAssertEqual(environment["SHIPYARD_RUST_ENABLE_TUNNEL"], "1")
         XCTAssertTrue(environment["PATH"]?.contains("/opt/homebrew/bin") == true)
     }
 }
