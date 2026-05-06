@@ -28,7 +28,17 @@ done
 rm -rf "$ARCHIVE"
 # Wipe DerivedData too so stale compiled objects from a pre-bump
 # generation don't linger with the old MARKETING_VERSION baked in.
-rm -rf "$DERIVED"
+if ! rm -rf "$DERIVED"; then
+  # Finder can race us by recreating a hidden .DS_Store in this folder.
+  # If that happens, remove everything meaningful and continue only when
+  # the directory is empty or contains Finder metadata.
+  find "$DERIVED" -mindepth 1 -maxdepth 1 ! -name .DS_Store -exec rm -rf {} + 2>/dev/null || true
+  find "$DERIVED" -name .DS_Store -delete 2>/dev/null || true
+  if [ -n "$(find "$DERIVED" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+    echo "Could not fully clean DerivedData at $DERIVED" >&2
+    exit 1
+  fi
+fi
 
 echo "Building $CONFIG archive → $ARCHIVE"
 xcodebuild \
