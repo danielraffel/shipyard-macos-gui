@@ -118,6 +118,7 @@ xcrun xcodebuild -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportPath "$EXPORT_ROOT/out" \
   -exportOptionsPlist "$EXPORT_ROOT/exportOptions.plist" \
+  OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
   >"$EXPORT_ROOT/export.log" 2>&1 || {
     echo "ERROR: exportArchive failed. Tail of log:" >&2
     tail -30 "$EXPORT_ROOT/export.log" >&2
