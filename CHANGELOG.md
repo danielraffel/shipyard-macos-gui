@@ -5,6 +5,9 @@ to its [GitHub Release](https://github.com/danielraffel/shipyard-macos-gui/relea
 
 ## Unreleased
 
+<a id="v0122"></a>
+## [0.1.22] - 2026-05-06
+
 - Pause GitHub API polling for every live-requested-but-not-live state, not only missing `admin:repo_hook`, so transient daemon/Tailscale failures cannot silently burn rate limit.
 
 <a id="v0121"></a>
