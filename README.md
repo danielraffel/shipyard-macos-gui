@@ -41,14 +41,15 @@ rate limits. Requires [Tailscale](https://tailscale.com) with
 When enabled, Shipyard sets up the tunnel and registers webhooks
 automatically; disabling reverses both.
 
-Default is **Auto** (live when Tailscale is ready, polling at 60s when
-it isn't). Set **On** to require live with a warning when unavailable,
-or **Off** to force polling. Webhook events route through Tailscale's
-edge directly to your Mac — no Shipyard-operated backend in between.
+Default is **Auto** (live when Tailscale is ready; GitHub API polling
+paused when it is not). Set **On** to require live with a warning when
+unavailable, or **Off** to force polling. Webhook events route through
+Tailscale's edge directly to your Mac — no Shipyard-operated backend in
+between.
 
 Webhook registration needs the GitHub CLI token to be allowed to manage repo
-hooks. If that scope is missing, the app keeps polling and shows a copy button
-for:
+hooks. If that scope is missing, the app pauses GitHub API polling and shows a
+copy button for:
 
 ```bash
 gh auth refresh -h github.com -s admin:repo_hook

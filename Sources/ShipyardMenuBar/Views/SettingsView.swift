@@ -84,9 +84,9 @@ struct SettingsView: View {
     private func modeDescription(for mode: LiveUpdateMode) -> String {
         switch mode {
         case .auto:
-            return "Near-realtime CI updates via webhooks when Tailscale Funnel is available. Falls back to polling every 60s when it isn't. We configure the tunnel and webhooks for you."
+            return "Near-realtime CI updates via webhooks when Tailscale Funnel is available. Pauses GitHub API polling when live mode is unavailable to protect your quota."
         case .on:
-            return "Require near-realtime updates via Tailscale Funnel. Shows a warning and falls back to polling if Tailscale isn't available. We configure the tunnel and webhooks for you."
+            return "Require near-realtime updates via Tailscale Funnel. Shows a warning and pauses GitHub API polling if live mode is unavailable."
         case .off:
             return "Polling every 60s. No webhooks registered, no tunnel. Use Auto for live updates when Tailscale is available."
         }

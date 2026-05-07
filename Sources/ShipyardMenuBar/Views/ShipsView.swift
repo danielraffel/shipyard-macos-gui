@@ -456,6 +456,7 @@ struct ShipsView: View {
     private var cadenceLabel: String {
         if case .live = store.liveStatus { return "Live via Tailscale Funnel" }
         if store.liveStartupPending { return "Starting live updates" }
+        if store.liveStatus.blocksGitHubAPIPolling { return "GitHub polling paused" }
         return "Polling every 60s"
     }
 }

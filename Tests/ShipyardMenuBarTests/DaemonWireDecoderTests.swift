@@ -211,7 +211,29 @@ final class DaemonWireDecoderTests: XCTestCase {
             liveStatus: status,
             rateLimitExceeded: true
         ))
+        XCTAssertFalse(AppStore.shouldPollGitHubActions(
+            showGitHubActions: true,
+            liveStartupPending: false,
+            liveStatus: status,
+            rateLimitExceeded: false
+        ))
+
+        let manualPolling = LiveUpdateStatus.polling(reason: .userDisabled)
         XCTAssertTrue(AppStore.shouldPollGitHubActions(
+            showGitHubActions: true,
+            liveStartupPending: false,
+            liveStatus: manualPolling,
+            rateLimitExceeded: false
+        ))
+    }
+
+    func test_githubPollingPolicyPausesForGenericLiveFailure() {
+        let status = LiveUpdateStatus.polling(reason: .tunnelStartFailed("daemon reported no tunnel"))
+
+        XCTAssertTrue(status.blocksGitHubAPIPolling)
+        XCTAssertTrue(status.usesConservativeGitHubPollingCadence)
+        XCTAssertEqual(AppStore.pollIntervalNanoseconds(for: status), 300_000_000_000)
+        XCTAssertFalse(AppStore.shouldPollGitHubActions(
             showGitHubActions: true,
             liveStartupPending: false,
             liveStatus: status,

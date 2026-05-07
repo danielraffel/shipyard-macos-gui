@@ -146,8 +146,8 @@ still authoritative: if the GUI probe is uncertain, the GUI attempts daemon
 connection and surfaces the daemon's real failure reason.
 
 GitHub webhook registration is allowed to fail soft when the `gh` token lacks
-`admin:repo_hook`. That state is not a daemon crash: the GUI keeps polling,
-shows a hook-authorization warning, and exposes a copy button for:
+`admin:repo_hook`. That state is not a daemon crash: the GUI pauses GitHub API
+polling, shows a hook-authorization warning, and exposes a copy button for:
 
 ```bash
 gh auth refresh -h github.com -s admin:repo_hook

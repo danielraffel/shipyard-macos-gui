@@ -130,6 +130,9 @@ struct PopoverView: View {
                 if let reason, reason.isWebhookScopeMissing {
                     return (.orange, reason.headerLabel)
                 }
+                if store.liveStatus.blocksGitHubAPIPolling {
+                    return (.orange, reason?.headerLabel ?? "paused")
+                }
                 return (.secondary, "polling")
             }
         }()

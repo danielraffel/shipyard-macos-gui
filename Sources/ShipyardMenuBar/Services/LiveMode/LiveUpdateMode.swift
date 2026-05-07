@@ -3,9 +3,9 @@ import Foundation
 /// User-facing live-updates preference. See Settings → Live updates.
 ///
 /// - `auto` (default): enable webhook delivery via Tailscale Funnel
-///   when it's available; silently fall back to polling when it's not.
+///   when it's available; pause GitHub API polling when it is not.
 /// - `on`: require live mode. If Tailscale isn't available, show a
-///   visible warning and poll as fallback.
+///   visible warning and pause GitHub API polling.
 /// - `off`: polling only, never attempt live mode.
 enum LiveUpdateMode: String, CaseIterable, Identifiable {
     case auto
@@ -26,9 +26,9 @@ enum LiveUpdateMode: String, CaseIterable, Identifiable {
     var hint: String {
         switch self {
         case .auto:
-            return "Live when Tailscale Funnel is available, polling when it isn't."
+            return "Live when Tailscale Funnel is available; pause GitHub polling when it isn't."
         case .on:
-            return "Require live updates via Tailscale Funnel; warn when unavailable."
+            return "Require live updates via Tailscale Funnel; warn and pause GitHub polling when unavailable."
         case .off:
             return "Polling only. Live updates disabled."
         }
@@ -50,26 +50,27 @@ enum LiveUpdateStatus: Equatable {
     /// most recent successfully-validated delivery.
     case live(tunnelURL: URL, lastEventAt: Date?)
 
-    /// True when the GUI should avoid GitHub API polling because live
-    /// mode needs one-time webhook authorization. Namespace polling is
-    /// still safe because it uses `nsc`, not the GitHub API.
+    /// True when the GUI should avoid GitHub API polling because the
+    /// user asked for live mode but the app is not live. Namespace
+    /// polling is still safe because it uses `nsc`, not the GitHub API.
     var blocksGitHubAPIPolling: Bool {
-        if case .polling(let reason) = self, reason?.isWebhookScopeMissing == true {
-            return true
+        switch self {
+        case .live:
+            return false
+        case .polling(let reason):
+            return reason != .userDisabled
         }
-        return false
     }
 
-    /// Use the low reconciliation cadence when webhooks are active or
-    /// when live mode is auth-blocked. The latter prevents a failed
-    /// webhook registration from silently turning into 60s GitHub API
-    /// polling.
+    /// Use the low reconciliation cadence when webhooks are active or when
+    /// live mode is blocked. The latter prevents a failed live setup from
+    /// silently turning into 60s GitHub API polling.
     var usesConservativeGitHubPollingCadence: Bool {
         switch self {
         case .live:
             return true
         case .polling(let reason):
-            return reason?.isWebhookScopeMissing == true
+            return reason != .userDisabled
         }
     }
 
@@ -124,13 +125,16 @@ enum LiveUpdateStatus: Equatable {
             case .userDisabled:
                 return "Polling every 60s"
             default:
-                return "Live updates unavailable — polling"
+                return "Live updates unavailable - GitHub polling paused"
             }
         }
 
         var headerLabel: String {
             if isWebhookScopeMissing {
                 return "hook auth"
+            }
+            if self != .userDisabled {
+                return "paused"
             }
             return "polling"
         }
@@ -143,19 +147,19 @@ enum LiveUpdateStatus: Equatable {
             case .userDisabled:
                 return "Live updates disabled."
             case .tailscaleNotInstalled:
-                return "Install Tailscale to enable live updates."
+                return "Install Tailscale to enable live updates. GitHub API polling is paused to protect your rate limit."
             case .tailscaleNotRunning:
-                return "Tailscale isn't running."
+                return "Tailscale isn't running. GitHub API polling is paused to protect your rate limit."
             case .funnelNotPermitted:
-                return "Funnel isn't permitted on this tailnet."
+                return "Funnel isn't permitted on this tailnet. GitHub API polling is paused to protect your rate limit."
             case .daemonUnavailable(let err):
                 return "shipyard daemon didn't start: \(err). "
                     + "Check ~/Library/Application Support/shipyard/daemon/daemon.log. "
-                    + "Often fixed by upgrading the shipyard CLI."
+                    + "GitHub API polling is paused to protect your rate limit."
             case .tunnelStartFailed(let err):
-                return "Tailscale Funnel couldn't come up: \(err)"
+                return "Tailscale Funnel couldn't come up: \(err). GitHub API polling is paused to protect your rate limit."
             case .serverStartFailed(let err):
-                return "Live mode setup failed: \(err)"
+                return "Live mode setup failed: \(err). GitHub API polling is paused to protect your rate limit."
             }
         }
     }
