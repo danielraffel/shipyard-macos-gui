@@ -29,6 +29,129 @@ cd "$PROJECT_ROOT"
 
 REPO="danielraffel/shipyard-macos-gui"
 TIMESTAMP_URL="http://timestamp.apple.com/ts01"
+GH_API_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+if [ -z "$GH_API_TOKEN" ] && command -v gh >/dev/null 2>&1; then
+  GH_API_TOKEN="$(gh auth token 2>/dev/null || true)"
+fi
+
+github_curl_common_args() {
+  if [ -n "${SHIPYARD_RELEASE_CURL_RESOLVE:-}" ]; then
+    local resolve
+    for resolve in ${SHIPYARD_RELEASE_CURL_RESOLVE}; do
+      printf '%s\n' --resolve "$resolve"
+    done
+  fi
+}
+
+github_api_curl() {
+  local curl_args=()
+  while IFS= read -r arg; do
+    curl_args+=("$arg")
+  done < <(github_curl_common_args)
+  if [ -n "$GH_API_TOKEN" ]; then
+    curl -fsSL "${curl_args[@]}" -H "Authorization: Bearer ${GH_API_TOKEN}" "$@"
+  else
+    curl -fsSL "${curl_args[@]}" "$@"
+  fi
+}
+
+github_api_status() {
+  local curl_args=()
+  while IFS= read -r arg; do
+    curl_args+=("$arg")
+  done < <(github_curl_common_args)
+  if [ -n "$GH_API_TOKEN" ]; then
+    curl -sS -o /dev/null -w "%{http_code}" "${curl_args[@]}" \
+      -H "Authorization: Bearer ${GH_API_TOKEN}" "$@"
+  else
+    curl -sS -o /dev/null -w "%{http_code}" "${curl_args[@]}" "$@"
+  fi
+}
+
+release_exists() {
+  local tag="$1"
+  local url="https://api.github.com/repos/${REPO}/releases/tags/${tag}"
+  local status
+  if ! status="$(github_api_status "$url")"; then
+    echo "ERROR: Could not reach GitHub release API for $tag." >&2
+    return 2
+  fi
+  case "$status" in
+    200) return 0 ;;
+    404) return 1 ;;
+    *)
+      echo "ERROR: GitHub release API returned HTTP $status for $tag." >&2
+      return 2
+      ;;
+  esac
+}
+
+release_payload() {
+  local tag="$1"
+  local url="https://api.github.com/repos/${REPO}/releases/tags/${tag}"
+  github_api_curl "$url"
+}
+
+release_json_field() {
+  local field="$1"
+  python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$field"
+}
+
+asset_id_for_name() {
+  local name="$1"
+  python3 -c '
+import json, sys
+name = sys.argv[1]
+for asset in json.load(sys.stdin).get("assets", []):
+    if asset.get("name") == name:
+        print(asset.get("id", ""))
+        break
+' "$name"
+}
+
+github_delete_curl() {
+  local curl_args=()
+  while IFS= read -r arg; do
+    curl_args+=("$arg")
+  done < <(github_curl_common_args)
+  if [ -n "$GH_API_TOKEN" ]; then
+    curl -fsSL "${curl_args[@]}" -X DELETE -H "Authorization: Bearer ${GH_API_TOKEN}" "$@"
+  else
+    curl -fsSL "${curl_args[@]}" -X DELETE "$@"
+  fi
+}
+
+github_upload_curl() {
+  local file="$1"; shift
+  local curl_args=()
+  while IFS= read -r arg; do
+    curl_args+=("$arg")
+  done < <(github_curl_common_args)
+  if [ -n "$GH_API_TOKEN" ]; then
+    curl -fsSL "${curl_args[@]}" -X POST -H "Authorization: Bearer ${GH_API_TOKEN}" \
+      -H "Content-Type: application/octet-stream" \
+      --data-binary "@${file}" "$@"
+  else
+    curl -fsSL "${curl_args[@]}" -X POST -H "Content-Type: application/octet-stream" \
+      --data-binary "@${file}" "$@"
+  fi
+}
+
+upload_release_asset_rest() {
+  local release="$1"
+  local path="$2"
+  local name
+  name="$(basename "$path")"
+  local asset_id
+  asset_id="$(printf '%s' "$release" | asset_id_for_name "$name")"
+  if [ -n "$asset_id" ]; then
+    github_delete_curl "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" >/dev/null
+  fi
+  local upload_url
+  upload_url="$(printf '%s' "$release" | release_json_field upload_url)"
+  upload_url="${upload_url%%\{*}"
+  github_upload_curl "$path" "${upload_url}?name=${name}" >/dev/null
+}
 
 # ── creds (loaded silently) ─────────────────────────────────────────
 if [ -f "$HOME/.config/shipyard-macos-gui.env" ]; then
@@ -457,15 +580,19 @@ XML
 } > "$APPCAST"
 
 # ── step 8: publish to GitHub Releases ──────────────────────────────
-if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+RELEASE_EXISTS_STATUS=0
+release_exists "$TAG" || RELEASE_EXISTS_STATUS=$?
+if [ "$RELEASE_EXISTS_STATUS" -eq 0 ]; then
   echo "→ Release $TAG exists — uploading DMG + Sparkle assets with --clobber"
-  gh release upload "$TAG" "$DMG" "$APPCAST" "$RELEASE_HTML" \
-    --repo "$REPO" --clobber
+  RELEASE_PAYLOAD="$(release_payload "$TAG")"
+  upload_release_asset_rest "$RELEASE_PAYLOAD" "$DMG"
+  upload_release_asset_rest "$RELEASE_PAYLOAD" "$APPCAST"
+  upload_release_asset_rest "$RELEASE_PAYLOAD" "$RELEASE_HTML"
   if [ -n "$NOTES_FILE" ]; then
     echo "→ Updating release body from shipyard notes"
     gh release edit "$TAG" --repo "$REPO" --notes-file "$NOTES_FILE"
   fi
-else
+elif [ "$RELEASE_EXISTS_STATUS" -eq 1 ]; then
   echo "→ Creating GitHub release $TAG (with appcast + release notes page)"
   if [ -n "$NOTES_FILE" ]; then
     gh release create "$TAG" "$DMG" "$APPCAST" "$RELEASE_HTML" \
@@ -480,6 +607,8 @@ else
       --generate-notes \
       $DRAFT_FLAG
   fi
+else
+  exit "$RELEASE_EXISTS_STATUS"
 fi
 
 # ── step 9: leave repository docs untouched ─────────────────────────
