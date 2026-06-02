@@ -28,3 +28,4 @@ Package.resolved
 
 ## Notarization intermediates
 *.zip
+prompt-exports/

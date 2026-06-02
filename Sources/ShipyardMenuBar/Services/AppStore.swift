@@ -819,6 +819,8 @@ final class AppStore: ObservableObject {
         stopRateLimitPolling()
         stopNamespaceActivityPolling()
         cancelGitHubDetailWork()
+        routingTasks.values.forEach { $0.cancel() }
+        routingTasks.removeAll()
         let oldPipeline = pipeline
         pipeline = nil
         Task {
@@ -1166,6 +1168,7 @@ final class AppStore: ObservableObject {
         }
         reseedAutoExpand()
         detectBadgeTransition()
+        ingestRoutingRoots(from: updated)
     }
 
     /// Re-run the auto-clear filter against the cached raw snapshot
@@ -1250,6 +1253,185 @@ final class AppStore: ObservableObject {
     /// Actions runs. Grows as the user ships new repos; never shrinks
     /// within a session.
     private var knownRepos: Set<String> = []
+
+    // MARK: - Routing (per-machine profile switching)
+
+    /// Repos (with checkout paths) the Routing picker can target.
+    @Published private(set) var routingRepositories: [RoutingRepository] = []
+    /// Selected routing repository id (stable; see `RoutingRepository`).
+    @Published var selectedRoutingRepositoryID: String =
+        UserDefaults.standard.string(forKey: Keys.selectedRoutingRepositoryID) ?? "" {
+        didSet {
+            UserDefaults.standard.set(
+                selectedRoutingRepositoryID, forKey: Keys.selectedRoutingRepositoryID)
+        }
+    }
+    /// Per-repo routing UI state (profiles snapshot, loading/saving/error).
+    @Published private(set) var routingStateByID: [String: RoutingState] = [:]
+    /// Whether the installed CLI supports `config use --local` (Phase-2 write gate).
+    @Published private(set) var routingWriteSupported: Bool = false
+
+    // repo slug -> known checkout roots (from ship-state; persisted as last-seen).
+    private var routingRepoRootsByRepo: [String: Set<String>] = {
+        let stored = UserDefaults.standard
+            .dictionary(forKey: Keys.routingLastSeenRepoRoots) as? [String: [String]] ?? [:]
+        return stored.mapValues { Set($0) }
+    }()
+    // routingRepositoryID -> user-picked checkout override (for no-root entries).
+    private var routingPathOverrides: [String: String] =
+        (UserDefaults.standard
+            .dictionary(forKey: Keys.routingRepoPathOverrides) as? [String: String]) ?? [:]
+    private var routingTasks: [String: Task<Void, Never>] = [:]
+    private var routingGenerations: [String: Int] = [:]
+    private var routingWriteProbed = false
+
+    /// Seed the picker (including from persisted last-seen repos so it survives a
+    /// restart with no active ship-state), pick a default, and load its profiles.
+    func ensureRoutingSeeded() {
+        rebuildRoutingRepositories()
+        if routingRepository(for: selectedRoutingRepositoryID) == nil {
+            selectedRoutingRepositoryID = routingRepositories.first?.id ?? ""
+        }
+        refreshSelectedRoutingProfiles()
+    }
+
+    func routingRepository(for id: String) -> RoutingRepository? {
+        routingRepositories.first { $0.id == id }
+    }
+
+    var selectedRoutingRepository: RoutingRepository? {
+        routingRepository(for: selectedRoutingRepositoryID) ?? routingRepositories.first
+    }
+
+    func refreshSelectedRoutingProfiles() {
+        guard let repo = selectedRoutingRepository else { return }
+        refreshRoutingProfiles(for: repo.id)
+    }
+
+    func refreshRoutingProfiles(for id: String) {
+        guard let binary = cliBinaryResolved,
+              let repo = routingRepository(for: id),
+              let root = repo.repoRoot, !root.isEmpty
+        else { return }
+        probeRoutingWriteSupport(binary: binary, repoRoot: root)
+        let generation = (routingGenerations[id] ?? 0) + 1
+        routingGenerations[id] = generation
+        routingTasks[id]?.cancel()
+        var state = routingStateByID[id] ?? RoutingState()
+        state.isLoading = true
+        state.errorMessage = nil
+        routingStateByID[id] = state
+        routingTasks[id] = Task { [weak self] in
+            do {
+                let snapshot = try await RoutingProfilesService.fetchProfiles(
+                    binary: binary, repoRoot: root)
+                guard let self, self.routingGenerations[id] == generation else { return }
+                var next = self.routingStateByID[id] ?? RoutingState()
+                next.snapshot = snapshot
+                next.isLoading = false
+                next.errorMessage = nil
+                self.routingStateByID[id] = next
+            } catch {
+                guard let self, self.routingGenerations[id] == generation else { return }
+                var next = self.routingStateByID[id] ?? RoutingState()
+                next.isLoading = false
+                next.errorMessage = error.localizedDescription
+                self.routingStateByID[id] = next
+            }
+        }
+    }
+
+    func useRoutingProfile(_ profileName: String, for id: String) {
+        guard routingWriteSupported,
+              let binary = cliBinaryResolved,
+              let repo = routingRepository(for: id),
+              let root = repo.repoRoot, !root.isEmpty
+        else { return }
+        let generation = (routingGenerations[id] ?? 0) + 1
+        routingGenerations[id] = generation
+        routingTasks[id]?.cancel()
+        var state = routingStateByID[id] ?? RoutingState()
+        state.isSaving = true
+        state.savingProfileName = profileName
+        state.errorMessage = nil
+        routingStateByID[id] = state
+        routingTasks[id] = Task { [weak self] in
+            do {
+                let snapshot = try await RoutingProfilesService.useProfileLocally(
+                    binary: binary, repoRoot: root, profileName: profileName)
+                guard let self, self.routingGenerations[id] == generation else { return }
+                var next = self.routingStateByID[id] ?? RoutingState()
+                next.snapshot = snapshot
+                next.isSaving = false
+                next.savingProfileName = nil
+                next.errorMessage = nil
+                self.routingStateByID[id] = next
+            } catch {
+                guard let self, self.routingGenerations[id] == generation else { return }
+                var next = self.routingStateByID[id] ?? RoutingState()
+                next.isSaving = false
+                next.savingProfileName = nil
+                next.errorMessage = error.localizedDescription
+                self.routingStateByID[id] = next
+            }
+        }
+    }
+
+    func setRoutingCheckoutPath(_ path: String, forRepo id: String) {
+        routingPathOverrides[id] = path
+        UserDefaults.standard.set(routingPathOverrides, forKey: Keys.routingRepoPathOverrides)
+        rebuildRoutingRepositories()
+        refreshRoutingProfiles(for: id)
+    }
+
+    /// True when `path` is an existing checkout containing `.shipyard/config.toml`.
+    func isValidRoutingCheckout(_ path: String) -> Bool {
+        guard !path.isEmpty else { return false }
+        let marker = (path as NSString).appendingPathComponent(".shipyard/config.toml")
+        return FileManager.default.fileExists(atPath: marker)
+    }
+
+    private func rebuildRoutingRepositories() {
+        var repos: [RoutingRepository] = []
+        for slug in routingRepoRootsByRepo.keys.sorted() {
+            let roots = (routingRepoRootsByRepo[slug] ?? [])
+                .filter { isValidRoutingCheckout($0) }
+            if roots.isEmpty {
+                let override = routingPathOverrides["noroot:\(slug)"]
+                    .flatMap { isValidRoutingCheckout($0) ? $0 : nil }
+                repos.append(.noRoot(repo: slug, override: override))
+            } else {
+                for root in roots.sorted() {
+                    repos.append(.rooted(repo: slug, repoRoot: root))
+                }
+            }
+        }
+        routingRepositories = repos
+    }
+
+    private func probeRoutingWriteSupport(binary: String, repoRoot: String) {
+        guard !routingWriteProbed else { return }
+        routingWriteProbed = true
+        Task { [weak self] in
+            let supported = await RoutingProfilesService.supportsLocalWrite(
+                binary: binary, repoRoot: repoRoot)
+            self?.routingWriteSupported = supported
+        }
+    }
+
+    /// Collect repo checkout roots from a fresh ship-state snapshot, persist them
+    /// as last-seen, and rebuild the picker.
+    private func ingestRoutingRoots(from ships: [Ship]) {
+        for ship in ships where !ship.repo.isEmpty {
+            var set = routingRepoRootsByRepo[ship.repo] ?? []
+            if !ship.worktree.isEmpty { set.insert(ship.worktree) }
+            routingRepoRootsByRepo[ship.repo] = set
+        }
+        UserDefaults.standard.set(
+            routingRepoRootsByRepo.mapValues { Array($0).sorted() },
+            forKey: Keys.routingLastSeenRepoRoots)
+        rebuildRoutingRepositories()
+    }
 
     func startGitHubPolling() {
         stopGitHubPolling()
@@ -1835,6 +2017,9 @@ final class AppStore: ObservableObject {
         static let liveUpdateMode = "liveUpdateMode"
         static let autoExpandActivePRs = "autoExpandActivePRs"
         static let launchAtLogin = "launchAtLogin"
+        static let selectedRoutingRepositoryID = "selectedRoutingRepositoryID"
+        static let routingRepoPathOverrides = "routingRepoPathOverrides"
+        static let routingLastSeenRepoRoots = "routingLastSeenRepoRoots"
     }
 
     /// Cancel or rerun a GitHub Actions run via `gh run …`. Both are

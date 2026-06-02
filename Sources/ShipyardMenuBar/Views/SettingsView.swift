@@ -8,6 +8,7 @@ struct SettingsView: View {
         Form {
             generalSection
             cliSection
+            routingSection
             liveUpdatesSection
             githubSection
             notificationsSection
@@ -378,6 +379,142 @@ struct SettingsView: View {
         }
     }
     #endif
+
+    // MARK: - Routing
+
+    private var routingSection: some View {
+        Section("Routing") {
+            if store.cliBinaryResolved == nil {
+                Text("Shipyard CLI not found — set it above to manage routing.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else if store.routingRepositories.isEmpty {
+                Text("No repos with Shipyard ship-state yet. Start a ship in a repo and it'll appear here.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker("Repository", selection: Binding(
+                    get: { store.selectedRoutingRepositoryID },
+                    set: { store.selectedRoutingRepositoryID = $0
+                        store.refreshSelectedRoutingProfiles() }
+                )) {
+                    ForEach(store.routingRepositories) { repo in
+                        Text(repo.repo).tag(repo.id)
+                    }
+                }
+                routingBody
+            }
+        }
+        .onAppear { store.ensureRoutingSeeded() }
+    }
+
+    @ViewBuilder
+    private var routingBody: some View {
+        if let repo = store.selectedRoutingRepository {
+            if repo.repoRoot == nil {
+                Text("Choose this repo's checkout so Shipyard can read `.shipyard/config.toml`.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Button("Choose Checkout…") { chooseCheckout(for: repo) }
+            } else {
+                let state = store.routingStateByID[repo.id] ?? RoutingState()
+                if state.isLoading && state.snapshot == nil {
+                    Text("Loading routing profiles…")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                } else if let snapshot = state.snapshot {
+                    if snapshot.profiles.isEmpty {
+                        Text("This repo has no Shipyard profiles yet — define them in `.shipyard/config.toml`.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(snapshot.profiles) { profile in
+                            routingRow(profile, snapshot: snapshot, repoID: repo.id, state: state)
+                        }
+                        routingFooter(snapshot: snapshot)
+                    }
+                }
+                if let error = state.errorMessage {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private func routingRow(
+        _ profile: RoutingProfile,
+        snapshot: RoutingProfilesSnapshot,
+        repoID: String,
+        state: RoutingState
+    ) -> some View {
+        let isActive = snapshot.active == profile.name
+        let writable = store.routingWriteSupported && !state.isSaving
+        return Button {
+            if writable && !isActive { store.useRoutingProfile(profile.name, for: repoID) }
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack {
+                        Text(profile.displayLabel)
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        Text(profile.name)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                    if !profile.targets.isEmpty {
+                        Text(profile.targets.joined(separator: ", "))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if state.isSaving && state.savingProfileName == profile.name {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!writable || isActive)
+    }
+
+    @ViewBuilder
+    private func routingFooter(snapshot: RoutingProfilesSnapshot) -> some View {
+        if !store.routingWriteSupported {
+            Text("Update Shipyard to switch routing from here (`config use --local` not available).")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        } else if snapshot.activeSource == .local {
+            Text("Local override active — stored per-machine in `.shipyard.local`. Won't change CI for collaborators.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        } else {
+            Text("Using the repo default. Choosing an option saves a per-machine override (`.shipyard.local`); collaborators are unaffected.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func chooseCheckout(for repo: RoutingRepository) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if store.isValidRoutingCheckout(url.path) {
+            store.setRoutingCheckoutPath(url.path, forRepo: repo.id)
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Not a Shipyard checkout"
+            alert.informativeText = "That folder doesn't contain `.shipyard/config.toml`."
+            alert.runModal()
+        }
+    }
 
     private func browse() {
         let panel = NSOpenPanel()

@@ -8,6 +8,7 @@ struct ShipStateListEntry: Decodable {
     let baseBranch: String?
     let headSha: String?
     let repo: String?
+    let repoRoot: String?
     let prUrl: String?
     let prTitle: String?
     let commitSubject: String?
@@ -18,6 +19,7 @@ struct ShipStateListEntry: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case pr, branch, repo, attempt
+        case repoRoot = "repo_root"
         case baseBranch = "base_branch"
         case headSha = "head_sha"
         case prUrl = "pr_url"
@@ -187,7 +189,7 @@ extension Ship {
             repo: entry.repo ?? "",
             prNumber: entry.pr,
             branch: entry.branch ?? "",
-            worktree: "",
+            worktree: entry.repoRoot ?? "",
             headSha: entry.headSha ?? "",
             prTitle: entry.prTitle ?? "",
             commitSubject: entry.commitSubject ?? "",
