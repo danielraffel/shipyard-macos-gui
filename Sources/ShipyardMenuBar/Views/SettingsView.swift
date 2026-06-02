@@ -7,6 +7,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             generalSection
+            serveSection
             cliSection
             liveUpdatesSection
             githubSection
@@ -378,6 +379,79 @@ struct SettingsView: View {
         }
     }
     #endif
+
+    // MARK: - Serve CI builds from this Mac
+
+    private var serveSection: some View {
+        Section("Serve CI builds from this Mac") {
+            let installed = store.servingLanes.filter { store.status(for: $0).installed }
+            if installed.isEmpty {
+                Text("No CI runner is set up on this Mac yet. Once this machine is onboarded as a runner, a toggle appears here.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(installed) { lane in
+                    serveRow(lane)
+                }
+                Text("When on, this Mac joins the build pool and runs CI jobs in throwaway VMs. Turn it off while you're working so builds don't run on your machine.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { store.refreshServingStatus() }
+    }
+
+    private func serveRow(_ lane: CIServingLane) -> some View {
+        let status = store.status(for: lane)
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(lane.platform)
+                    .font(.system(size: 12, weight: .medium))
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(serveStatusColor(status))
+                        .frame(width: 7, height: 7)
+                    Text(status.summary)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if status.isToggling {
+                ProgressView().controlSize(.small)
+            }
+            Toggle("", isOn: Binding(
+                get: { status.serving },
+                set: { handleServeToggle($0, lane: lane, status: status) }
+            ))
+            .labelsHidden()
+            .disabled(status.isToggling)
+        }
+    }
+
+    private func serveStatusColor(_ status: CIServingStatus) -> Color {
+        guard status.serving else { return .secondary }
+        return status.isBusy ? .orange : .green
+    }
+
+    private func handleServeToggle(_ on: Bool, lane: CIServingLane, status: CIServingStatus) {
+        // Confirm before yanking the pool out from under an in-flight build.
+        if !on && status.isBusy {
+            let alert = NSAlert()
+            alert.messageText = "A build is running on this Mac"
+            let n = status.busyVMs
+            alert.informativeText =
+                "Turning off pool participation now will cancel \(n) in-progress build\(n == 1 ? "" : "s"). Stop anyway?"
+            alert.addButton(withTitle: "Stop Now")
+            alert.addButton(withTitle: "Keep Serving")
+            if alert.runModal() == .alertFirstButtonReturn {
+                store.setServing(false, lane: lane)
+            }
+            // Otherwise leave it serving; the toggle reverts on next refresh.
+        } else {
+            store.setServing(on, lane: lane)
+        }
+    }
 
     private func browse() {
         let panel = NSOpenPanel()

@@ -819,6 +819,9 @@ final class AppStore: ObservableObject {
         stopRateLimitPolling()
         stopNamespaceActivityPolling()
         cancelGitHubDetailWork()
+        servingRefreshTask?.cancel()
+        servingToggleTasks.values.forEach { $0.cancel() }
+        servingToggleTasks.removeAll()
         let oldPipeline = pipeline
         pipeline = nil
         Task {
@@ -1250,6 +1253,54 @@ final class AppStore: ObservableObject {
     /// Actions runs. Grows as the user ships new repos; never shrinks
     /// within a session.
     private var knownRepos: Set<String> = []
+
+    // MARK: - CI pool participation ("Serve CI builds from this Mac")
+
+    /// Live status per servable lane, keyed by lane id.
+    @Published private(set) var servingStatusByLane: [String: CIServingStatus] = [:]
+    private var servingRefreshTask: Task<Void, Never>?
+    private var servingToggleTasks: [String: Task<Void, Never>] = [:]
+
+    /// All known lanes (today: macOS only).
+    var servingLanes: [CIServingLane] { CIServingLane.known }
+
+    func status(for lane: CIServingLane) -> CIServingStatus {
+        servingStatusByLane[lane.id] ?? .unknown
+    }
+
+    /// Re-read each lane's installed / serving / busy status.
+    func refreshServingStatus() {
+        servingRefreshTask?.cancel()
+        servingRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            var next: [String: CIServingStatus] = [:]
+            for lane in CIServingLane.known {
+                let toggling = self.servingStatusByLane[lane.id]?.isToggling ?? false
+                var status = await CIServingService.status(for: lane)
+                status.isToggling = toggling
+                next[lane.id] = status
+            }
+            guard !Task.isCancelled else { return }
+            self.servingStatusByLane = next
+        }
+    }
+
+    /// Toggle whether this Mac participates in the pool for `lane`.
+    func setServing(_ on: Bool, lane: CIServingLane) {
+        servingToggleTasks[lane.id]?.cancel()
+        var status = servingStatusByLane[lane.id] ?? .unknown
+        status.isToggling = true
+        servingStatusByLane[lane.id] = status
+        servingToggleTasks[lane.id] = Task { [weak self] in
+            _ = await CIServingService.setServing(on, lane: lane)
+            guard let self else { return }
+            // launchd settles asynchronously; re-read the true state.
+            var fresh = await CIServingService.status(for: lane)
+            fresh.isToggling = false
+            guard !Task.isCancelled else { return }
+            self.servingStatusByLane[lane.id] = fresh
+        }
+    }
 
     func startGitHubPolling() {
         stopGitHubPolling()
