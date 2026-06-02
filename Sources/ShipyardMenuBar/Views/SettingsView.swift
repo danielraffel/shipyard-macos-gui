@@ -428,6 +428,7 @@ struct SettingsView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     } else {
+                        routingDefaultRow(snapshot: snapshot)
                         ForEach(snapshot.profiles) { profile in
                             routingRow(profile, snapshot: snapshot, repoID: repo.id, state: state)
                         }
@@ -480,6 +481,35 @@ struct SettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(!writable || isActive)
+    }
+
+    /// Explicit "no profile active" anchor so first-launch isn't an empty radio
+    /// group. Selected when nothing is active; the repo then runs its default
+    /// (unfiltered) targets. Not a switch target yet — reverting a per-machine
+    /// override back to the repo default needs `config use --local --clear`.
+    private func routingDefaultRow(snapshot: RoutingProfilesSnapshot) -> some View {
+        let isActive = snapshot.active == nil
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack {
+                    Text("Repo default")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Text("default")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                Text("No per-machine profile — uses the repo's configured targets.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .opacity(isActive ? 1 : 0.55)
+        .help(isActive
+            ? "No profile is active for this Mac."
+            : "Reverting a local override to the repo default isn't supported yet.")
     }
 
     @ViewBuilder
