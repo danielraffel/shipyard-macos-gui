@@ -17,6 +17,8 @@ into a shell:
 - Click straight through to the GitHub run, the PR, or logs.
 - See active Namespace runner instances from `nsc list` without spending
   GitHub API quota.
+- **Serve CI from this Mac** — a one-tap toggle to pull your machine in or out
+  of the build pool, so it isn't running CI jobs while you're working.
 - `shipyard doctor` output in a dedicated pane.
 - Notifications on merge / fail / all-green.
 
@@ -75,6 +77,20 @@ Older CLIs fall back to the legacy
 The Tailscale App Store build is supported for live mode; the app probes
 `/Applications/Tailscale.app/Contents/MacOS/Tailscale` before Homebrew
 or system PATH locations.
+
+## Serve CI builds from this Mac
+
+If this Mac is set up as a self-hosted runner, **Settings → Serve CI builds from
+this Mac** shows a per-platform toggle (today: macOS, via the Tart runner
+installed by pulp's `tools/ci/setup-ci-host.sh`). Flip it **on** and the Mac
+joins the pool and runs CI jobs in throwaway VMs; flip it **off** while you're
+working so builds don't run on your machine.
+
+The toggle loads/unloads the runner's launchd agent and reflects live state —
+*Not serving*, *Serving · idle*, or *Serving · building (N)* when VMs are
+active. Turning it off mid-build asks before cancelling in-progress builds.
+The row only appears once a runner is installed; the design is structured so
+Linux/Windows lanes can be added later as additional rows.
 
 ## Namespace instances
 
