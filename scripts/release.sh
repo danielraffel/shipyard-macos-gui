@@ -49,9 +49,9 @@ github_api_curl() {
     curl_args+=("$arg")
   done < <(github_curl_common_args)
   if [ -n "$GH_API_TOKEN" ]; then
-    curl -fsSL "${curl_args[@]}" -H "Authorization: Bearer ${GH_API_TOKEN}" "$@"
+    curl -fsSL ${curl_args[@]+"${curl_args[@]}"} -H "Authorization: Bearer ${GH_API_TOKEN}" "$@"
   else
-    curl -fsSL "${curl_args[@]}" "$@"
+    curl -fsSL ${curl_args[@]+"${curl_args[@]}"} "$@"
   fi
 }
 
@@ -61,10 +61,10 @@ github_api_status() {
     curl_args+=("$arg")
   done < <(github_curl_common_args)
   if [ -n "$GH_API_TOKEN" ]; then
-    curl -sS -o /dev/null -w "%{http_code}" "${curl_args[@]}" \
+    curl -sS -o /dev/null -w "%{http_code}" ${curl_args[@]+"${curl_args[@]}"} \
       -H "Authorization: Bearer ${GH_API_TOKEN}" "$@"
   else
-    curl -sS -o /dev/null -w "%{http_code}" "${curl_args[@]}" "$@"
+    curl -sS -o /dev/null -w "%{http_code}" ${curl_args[@]+"${curl_args[@]}"} "$@"
   fi
 }
 
@@ -115,9 +115,9 @@ github_delete_curl() {
     curl_args+=("$arg")
   done < <(github_curl_common_args)
   if [ -n "$GH_API_TOKEN" ]; then
-    curl -fsSL "${curl_args[@]}" -X DELETE -H "Authorization: Bearer ${GH_API_TOKEN}" "$@"
+    curl -fsSL ${curl_args[@]+"${curl_args[@]}"} -X DELETE -H "Authorization: Bearer ${GH_API_TOKEN}" "$@"
   else
-    curl -fsSL "${curl_args[@]}" -X DELETE "$@"
+    curl -fsSL ${curl_args[@]+"${curl_args[@]}"} -X DELETE "$@"
   fi
 }
 
@@ -128,11 +128,11 @@ github_upload_curl() {
     curl_args+=("$arg")
   done < <(github_curl_common_args)
   if [ -n "$GH_API_TOKEN" ]; then
-    curl -fsSL "${curl_args[@]}" -X POST -H "Authorization: Bearer ${GH_API_TOKEN}" \
+    curl -fsSL ${curl_args[@]+"${curl_args[@]}"} -X POST -H "Authorization: Bearer ${GH_API_TOKEN}" \
       -H "Content-Type: application/octet-stream" \
       --data-binary "@${file}" "$@"
   else
-    curl -fsSL "${curl_args[@]}" -X POST -H "Content-Type: application/octet-stream" \
+    curl -fsSL ${curl_args[@]+"${curl_args[@]}"} -X POST -H "Content-Type: application/octet-stream" \
       --data-binary "@${file}" "$@"
   fi
 }
