@@ -1302,6 +1302,42 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // MARK: - Local emulated x86_64 smoke ("Run local smoke checks")
+
+    /// Live status per smoke lane, keyed by lane id.
+    @Published private(set) var smokeStatusByLane: [String: CISmokeStatus] = [:]
+    private var smokeRunTasks: [String: Task<Void, Never>] = [:]
+
+    /// All wired smoke lanes (today: Linux x86_64 via qemu-user).
+    var smokeLanes: [CISmokeLane] { CISmokeLane.known }
+
+    func smokeStatus(for lane: CISmokeLane) -> CISmokeStatus {
+        smokeStatusByLane[lane.id] ?? (CISmokeService.isAvailable() ? .idle : .unavailable)
+    }
+
+    /// Re-read tartci availability; seed idle/unavailable for lanes not yet run.
+    func refreshSmokeAvailability() {
+        let available = CISmokeService.isAvailable()
+        for lane in CISmokeLane.known where smokeStatusByLane[lane.id]?.isRunning != true {
+            let current = smokeStatusByLane[lane.id]
+            // Don't clobber a real passed/failed result on a plain refresh.
+            if current == nil || current?.state == .unavailable || current?.state == .idle {
+                smokeStatusByLane[lane.id] = available ? .idle : .unavailable
+            }
+        }
+    }
+
+    /// Run a smoke lane once (cross build + emulated tests, then discard the VM).
+    func runSmoke(_ lane: CISmokeLane, selfTest: Bool = false) {
+        guard smokeStatusByLane[lane.id]?.isRunning != true else { return }
+        smokeStatusByLane[lane.id] = CISmokeStatus(state: .running, detail: nil)
+        smokeRunTasks[lane.id] = Task { [weak self] in
+            let result = await CISmokeService.run(lane, selfTest: selfTest)
+            guard let self, !Task.isCancelled else { return }
+            self.smokeStatusByLane[lane.id] = result
+        }
+    }
+
     func startGitHubPolling() {
         stopGitHubPolling()
         githubPollTask = Task { [weak self] in

@@ -8,6 +8,7 @@ struct SettingsView: View {
         Form {
             generalSection
             serveSection
+            smokeSection
             cliSection
             liveUpdatesSection
             githubSection
@@ -432,6 +433,55 @@ struct SettingsView: View {
     private func serveStatusColor(_ status: CIServingStatus) -> Color {
         guard status.serving else { return .secondary }
         return status.isBusy ? .orange : .green
+    }
+
+    // MARK: - Run local smoke checks (emulated x86_64)
+
+    private var smokeSection: some View {
+        Section("Run local smoke checks") {
+            ForEach(store.smokeLanes) { lane in
+                smokeRow(lane)
+            }
+            Text("On Apple Silicon the local VMs are ARM64. These run a one-shot x86_64 build via emulation (cross-compile + qemu-user) in a throwaway VM — a smoke/debug signal, not a gate. GitHub-hosted x64 stays authoritative.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        .onAppear { store.refreshSmokeAvailability() }
+    }
+
+    private func smokeRow(_ lane: CISmokeLane) -> some View {
+        let status = store.smokeStatus(for: lane)
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(lane.title)
+                    .font(.system(size: 12, weight: .medium))
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(smokeStatusColor(status))
+                        .frame(width: 7, height: 7)
+                    Text(status.summary)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if status.isRunning {
+                ProgressView().controlSize(.small)
+            }
+            Button("Run") { store.runSmoke(lane) }
+                .controlSize(.small)
+                .disabled(!status.canRun)
+        }
+    }
+
+    private func smokeStatusColor(_ status: CISmokeStatus) -> Color {
+        switch status.state {
+        case .unavailable: return .secondary
+        case .idle:        return .secondary
+        case .running:     return .orange
+        case .passed:      return .green
+        case .failed:      return .red
+        }
     }
 
     private func handleServeToggle(_ on: Bool, lane: CIServingLane, status: CIServingStatus) {
