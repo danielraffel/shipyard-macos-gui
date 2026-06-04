@@ -35,8 +35,14 @@ enum CISmokeService {
 
     private struct ProcResult { let tail: String; let exitCode: Int32 }
 
-    /// Spawn `binary args…`, stream-drain stdout+stderr, keep only the tail (the
-    /// run is long and chatty; we surface a one-line result, not the whole log).
+    /// How many trailing lines of output we keep for the row's result detail.
+    private static let tailLineCap = 16
+
+    /// Spawn `binary args…` and stream-drain combined stdout/stderr into a
+    /// BOUNDED tail buffer — a cross-build can emit megabytes of compiler/test
+    /// output, and the menu-bar app only needs the last few lines, so we never
+    /// hold the whole log in memory (and draining as we go avoids the classic
+    /// full-pipe deadlock).
     private static func runProcess(_ binary: String, _ args: [String]) async -> ProcResult {
         await withCheckedContinuation { (cont: CheckedContinuation<ProcResult, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -55,12 +61,32 @@ enum CISmokeService {
                         exitCode: -1))
                     return
                 }
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let handle = pipe.fileHandleForReading
+                var tailLines: [String] = []        // bounded ring: last `tailLineCap` lines
+                var pending = ""                     // current partial line
+                func absorbLine(_ line: String) {
+                    tailLines.append(line)
+                    if tailLines.count > tailLineCap {
+                        tailLines.removeFirst(tailLines.count - tailLineCap)
+                    }
+                }
+                while case let chunk = handle.availableData, !chunk.isEmpty {
+                    pending += String(decoding: chunk, as: UTF8.self)
+                    while let nl = pending.firstIndex(of: "\n") {
+                        absorbLine(String(pending[..<nl]))
+                        pending = String(pending[pending.index(after: nl)...])
+                    }
+                    // Guard against a pathological newline-less stream: keep only
+                    // the trailing 8 KB of an unterminated line.
+                    if pending.utf8.count > 8192 {
+                        pending = String(pending.suffix(4096))
+                    }
+                }
+                if !pending.isEmpty { absorbLine(pending) }
                 process.waitUntilExit()
-                let text = String(data: data, encoding: .utf8) ?? ""
-                // Keep the last ~16 lines so a failure's cause is visible.
-                let tail = text.split(separator: "\n").suffix(16).joined(separator: "\n")
-                cont.resume(returning: ProcResult(tail: tail, exitCode: process.terminationStatus))
+                cont.resume(returning: ProcResult(
+                    tail: tailLines.joined(separator: "\n"),
+                    exitCode: process.terminationStatus))
             }
         }
     }
