@@ -391,11 +391,26 @@ if [ -z "$SPARKLE_ARTIFACTS" ] || [ ! -x "$SPARKLE_ARTIFACTS/sign_update" ]; the
   exit 1
 fi
 echo "→ Signing DMG with Sparkle (sign_update)"
-SIGN_OUT=$("$SPARKLE_ARTIFACTS/sign_update" "$DMG") || {
-  echo "ERROR: sign_update failed. Does your Keychain have the EdDSA private key?" >&2
-  echo "       Run '$SPARKLE_ARTIFACTS/generate_keys' once to create it." >&2
-  exit 1
-}
+# By default sign_update reads the EdDSA private key from the macOS Keychain,
+# but that pops an "allow access" prompt in non-interactive / automation runs
+# (modern macOS requires the key's partition list to include the tool, which in
+# turn needs the login-keychain password to set). To sign hands-off, set
+# SPARKLE_ED_KEY_FILE (e.g. in ~/.config/shipyard-macos-gui.env) to a 0600 file
+# containing the base64 EdDSA private key — no keychain, no prompt. The key file
+# is equivalent to `generate_keys -x` output; keep it out of git.
+if [ -n "${SPARKLE_ED_KEY_FILE:-}" ]; then
+  [ -f "$SPARKLE_ED_KEY_FILE" ] || { echo "ERROR: SPARKLE_ED_KEY_FILE set but not found: $SPARKLE_ED_KEY_FILE" >&2; exit 1; }
+  SIGN_OUT=$("$SPARKLE_ARTIFACTS/sign_update" --ed-key-file "$SPARKLE_ED_KEY_FILE" "$DMG") || {
+    echo "ERROR: sign_update failed with SPARKLE_ED_KEY_FILE=$SPARKLE_ED_KEY_FILE (wrong key file?)." >&2
+    exit 1
+  }
+else
+  SIGN_OUT=$("$SPARKLE_ARTIFACTS/sign_update" "$DMG") || {
+    echo "ERROR: sign_update failed. Either add the EdDSA private key to the Keychain" >&2
+    echo "       ('$SPARKLE_ARTIFACTS/generate_keys'), or set SPARKLE_ED_KEY_FILE to a key file." >&2
+    exit 1
+  }
+fi
 # Output looks like:
 #   sparkle:edSignature="..." length="2959383"
 # Extract the signature + length for the appcast entry.
