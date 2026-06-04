@@ -1268,6 +1268,12 @@ final class AppStore: ObservableObject {
         servingStatusByLane[lane.id] ?? .unknown
     }
 
+    /// Aggregate runner state for the popover header — the *runner* signal,
+    /// deliberately separate from `liveStatus` (the connection/data signal).
+    var runnerHeaderState: RunnerHeaderState {
+        RunnerHeaderState.from(CIServingLane.known.map { status(for: $0) })
+    }
+
     /// Re-read each lane's installed / serving / busy status.
     func refreshServingStatus() {
         servingRefreshTask?.cancel()

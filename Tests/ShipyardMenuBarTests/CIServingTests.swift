@@ -33,11 +33,57 @@ final class CIServingTests: XCTestCase {
                        "Not serving")
         XCTAssertEqual(CIServingStatus(installed: true, serving: true, busyVMs: 0).summary,
                        "Serving · idle")
+        // Honest wording: a running VM may be a warm runner waiting for a job,
+        // so we report "N VM(s) up", not the over-stated "building (N)".
+        XCTAssertEqual(CIServingStatus(installed: true, serving: true, busyVMs: 1).summary,
+                       "Serving · 1 VM up")
         XCTAssertEqual(CIServingStatus(installed: true, serving: true, busyVMs: 2).summary,
-                       "Serving · building (2)")
+                       "Serving · 2 VMs up")
         var toggling = CIServingStatus(installed: true, serving: true, busyVMs: 0)
         toggling.isToggling = true
         XCTAssertEqual(toggling.summary, "Updating…")
+    }
+
+    func testRunnerHeaderStateSeparatesFromConnection() {
+        // No lane installed → header runner indicator is hidden entirely.
+        let none = RunnerHeaderState.from([
+            CIServingStatus(installed: false, serving: false, busyVMs: 0),
+        ])
+        XCTAssertEqual(none.kind, .none)
+        XCTAssertFalse(none.isVisible)
+        XCTAssertEqual(none.label, "")
+
+        // Installed but not serving → "runner off".
+        let off = RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: false, busyVMs: 0),
+        ])
+        XCTAssertEqual(off.kind, .off)
+        XCTAssertTrue(off.isVisible)
+        XCTAssertEqual(off.label, "runner off")
+
+        // Serving, no VM up → "serving".
+        let idle = RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: true, busyVMs: 0),
+        ])
+        XCTAssertEqual(idle.kind, .serving)
+        XCTAssertEqual(idle.label, "serving")
+
+        // Serving with a VM up → "serving · N up".
+        let busy = RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: true, busyVMs: 1),
+        ])
+        XCTAssertEqual(busy.label, "serving · 1 up")
+    }
+
+    func testRunnerHeaderStateDoesNotDoubleCountHostGlobalVMCount() {
+        // busyVMs is host-global (same number reported by every Tart-backed
+        // lane), so the roll-up must take the max, not the sum.
+        let state = RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: true, busyVMs: 1),  // macOS
+            CIServingStatus(installed: true, serving: true, busyVMs: 1),  // linux (same VM count)
+        ])
+        XCTAssertEqual(state.runningVMs, 1)
+        XCTAssertEqual(state.label, "serving · 1 up")
     }
 
     func testKnownLanesAreMacOSLinuxWindows() {
