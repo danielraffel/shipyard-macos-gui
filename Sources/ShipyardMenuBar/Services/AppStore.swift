@@ -1312,7 +1312,10 @@ final class AppStore: ObservableObject {
     var smokeLanes: [CISmokeLane] { CISmokeLane.known }
 
     func smokeStatus(for lane: CISmokeLane) -> CISmokeStatus {
-        smokeStatusByLane[lane.id] ?? (CISmokeService.isAvailable() ? .idle : .unavailable)
+        // Default to .idle (no filesystem probe on the SwiftUI render path);
+        // refreshSmokeAvailability() seeds the real installed/unavailable state
+        // on the section's onAppear, mirroring how serving seeds .unknown.
+        smokeStatusByLane[lane.id] ?? .idle
     }
 
     /// Re-read tartci availability; seed idle/unavailable for lanes not yet run.
@@ -1330,6 +1333,9 @@ final class AppStore: ObservableObject {
     /// Run a smoke lane once (cross build + emulated tests, then discard the VM).
     func runSmoke(_ lane: CISmokeLane, selfTest: Bool = false) {
         guard smokeStatusByLane[lane.id]?.isRunning != true else { return }
+        // Cancel any prior task before reassigning (matches setServing), so a
+        // status that somehow diverged can't leave the lane wedged at .running.
+        smokeRunTasks[lane.id]?.cancel()
         smokeStatusByLane[lane.id] = CISmokeStatus(state: .running, detail: nil)
         smokeRunTasks[lane.id] = Task { [weak self] in
             let result = await CISmokeService.run(lane, selfTest: selfTest)
