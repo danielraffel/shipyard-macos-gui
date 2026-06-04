@@ -40,13 +40,30 @@ final class CIServingTests: XCTestCase {
         XCTAssertEqual(toggling.summary, "Updating…")
     }
 
-    func testKnownLaneIsMacOS() {
+    func testKnownLanesAreMacOSLinuxWindows() {
         let lanes = CIServingLane.known
-        XCTAssertEqual(lanes.count, 1)
+        XCTAssertEqual(lanes.map(\.id), ["macos", "linux", "windows"])
+
         let mac = lanes[0]
-        XCTAssertEqual(mac.id, "macos")
         XCTAssertEqual(mac.platform, "macOS")
         XCTAssertTrue(mac.plistPath.hasSuffix(
             "Library/LaunchAgents/com.danielraffel.pulp.tart-runner.plist"))
+
+        let linux = lanes[1]
+        XCTAssertEqual(linux.platform, "Linux")
+        XCTAssertEqual(linux.agentLabel, "com.danielraffel.pulp.tart-runner-linux")
+        XCTAssertTrue(linux.plistPath.hasSuffix(
+            "Library/LaunchAgents/com.danielraffel.pulp.tart-runner-linux.plist"))
+
+        let windows = lanes[2]
+        XCTAssertEqual(windows.platform, "Windows")
+        XCTAssertEqual(windows.agentLabel, "com.danielraffel.pulp.qemu-runner-windows")
+        XCTAssertTrue(windows.plistPath.hasSuffix(
+            "Library/LaunchAgents/com.danielraffel.pulp.qemu-runner-windows.plist"))
+
+        // Every lane's plist path is derived from its agent label (universal shape).
+        for lane in lanes {
+            XCTAssertTrue(lane.plistPath.hasSuffix("Library/LaunchAgents/\(lane.agentLabel).plist"))
+        }
     }
 }

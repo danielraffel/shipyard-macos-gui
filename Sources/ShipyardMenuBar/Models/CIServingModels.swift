@@ -3,26 +3,46 @@ import Foundation
 /// A CI "lane" this Mac can serve — i.e. a self-hosted runner for one platform,
 /// backed by a launchd agent that picks up jobs and runs each in a throwaway VM.
 ///
-/// v1 ships a single macOS lane (the Tart runner installed by pulp's
-/// `tools/ci/setup-ci-host.sh`). The list shape is deliberate so Linux/Windows
-/// lanes can be added later as extra rows with no UI redesign.
+/// Each lane is a self-hosted runner LaunchAgent for one platform; toggling the
+/// row `launchctl load/unload`s that agent, so the switch is universal across
+/// platforms with no UI redesign. A lane only appears once its agent plist is
+/// installed (by pulp's `tools/ci/setup-ci-host.sh` for macOS, or the
+/// `tart-runner-linux` / `qemu-runner-windows` supervisors for the VM lanes);
+/// an un-installed lane renders as "Not set up on this Mac".
 struct CIServingLane: Identifiable, Equatable {
     let id: String           // stable key, e.g. "macos"
     let platform: String     // display name, e.g. "macOS"
     let agentLabel: String   // launchd label
     let plistPath: String    // ~/Library/LaunchAgents/<label>.plist
 
-    /// Lanes this build of the app knows how to toggle. Today: just macOS.
+    private static func agentPlist(_ label: String) -> String {
+        (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
+    }
+
+    /// Lanes this build of the app knows how to toggle — one row per platform.
+    /// Each is opt-in/out independently, so you can serve macOS but not Linux,
+    /// or pause any of them while you're working, without overwhelming the Mac.
     static var known: [CIServingLane] {
         [
             CIServingLane(
                 id: "macos",
                 platform: "macOS",
                 agentLabel: "com.danielraffel.pulp.tart-runner",
-                plistPath: (NSHomeDirectory() as NSString)
-                    .appendingPathComponent(
-                        "Library/LaunchAgents/com.danielraffel.pulp.tart-runner.plist")
-            )
+                plistPath: agentPlist("com.danielraffel.pulp.tart-runner")
+            ),
+            CIServingLane(
+                id: "linux",
+                platform: "Linux",
+                agentLabel: "com.danielraffel.pulp.tart-runner-linux",
+                plistPath: agentPlist("com.danielraffel.pulp.tart-runner-linux")
+            ),
+            CIServingLane(
+                id: "windows",
+                platform: "Windows",
+                agentLabel: "com.danielraffel.pulp.qemu-runner-windows",
+                plistPath: agentPlist("com.danielraffel.pulp.qemu-runner-windows")
+            ),
         ]
     }
 }
