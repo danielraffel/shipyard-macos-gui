@@ -43,6 +43,9 @@ struct PopoverView: View {
             ClipboardToastView()
                 .padding(.bottom, 14)
         }
+        // The runner indicator lives in the always-visible header, so refresh
+        // serving status when the popover opens (not only on the Settings tab).
+        .onAppear { store.refreshServingStatus() }
     }
 
     private var headerBar: some View {
@@ -55,6 +58,8 @@ struct PopoverView: View {
                 Text("Shipyard")
                     .font(.system(size: 13, weight: .semibold))
                 statusDot
+                    .help("Live-data connection — how the app fetches PR status (live webhooks vs. polling). This is NOT your runner; builds still run when this says paused.")
+                runnerDot
                 Spacer()
                 Button {
                     NSApp.terminate(nil)
@@ -131,7 +136,12 @@ struct PopoverView: View {
                     return (.orange, reason.headerLabel)
                 }
                 if store.liveStatus.blocksGitHubAPIPolling {
-                    return (.orange, reason?.headerLabel ?? "paused")
+                    // Always say "updates paused" here — PollingReason.headerLabel
+                    // returns the generic "paused" for most degraded cases
+                    // (e.g. Tailscale down), which is exactly the wording that
+                    // read as "the app/runner is paused". The specific reason is
+                    // in the tooltip + Settings.
+                    return (.orange, "updates paused")
                 }
                 return (.secondary, "polling")
             }
@@ -143,6 +153,33 @@ struct PopoverView: View {
             Text(label)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The RUNNER signal — whether THIS Mac is serving CI builds — shown as a
+    /// distinct indicator (a play/pause glyph, not a plain dot) so it never reads
+    /// as the connection state next to it. Hidden when no runner lane is set up.
+    @ViewBuilder
+    private var runnerDot: some View {
+        let state = store.runnerHeaderState
+        if state.isVisible {
+            let (icon, color): (String, Color) = {
+                switch state.kind {
+                case .serving:  return ("play.circle.fill", ShipyardColors.green)
+                case .updating: return ("arrow.triangle.2.circlepath", .secondary)
+                case .off:      return ("pause.circle", .secondary)
+                case .none:     return ("", .secondary)
+                }
+            }()
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 9))
+                    .foregroundStyle(color)
+                Text(state.label)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            .help("Runner state — whether this Mac is in the CI pool serving builds. Toggle in Settings → Serve CI builds from this Mac. A VM shown here may be a warm runner waiting for a job, not actively building.")
         }
     }
 }

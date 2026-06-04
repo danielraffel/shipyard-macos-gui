@@ -67,6 +67,49 @@ struct CIServingStatus: Equatable {
         if !installed { return "Not set up on this Mac" }
         if isToggling { return "Updating…" }
         if !serving { return "Not serving" }
-        return isBusy ? "Serving · building (\(busyVMs))" : "Serving · idle"
+        // A running VM may be a WARM runner waiting for a job, not actively
+        // building — so report the honest "N VM up" count rather than claiming
+        // "building", which over-states what we actually know.
+        guard isBusy else { return "Serving · idle" }
+        return "Serving · \(busyVMs) VM\(busyVMs == 1 ? "" : "s") up"
+    }
+}
+
+/// Aggregate runner state for the popover header — the *runner* signal, kept
+/// deliberately SEPARATE from the connection/live-update signal (`statusDot`).
+/// The header was conflating "is the app getting live data" with "is this Mac
+/// serving CI"; this is the second, distinct indicator.
+struct RunnerHeaderState: Equatable {
+    enum Kind: Equatable { case none, off, updating, serving }
+    let kind: Kind
+    let runningVMs: Int
+
+    /// Hidden entirely when no runner lane is installed on this Mac.
+    var isVisible: Bool { kind != .none }
+
+    var label: String {
+        switch kind {
+        case .none:     return ""
+        case .off:      return "runner off"
+        case .updating: return "updating…"
+        case .serving:  return runningVMs > 0 ? "serving · \(runningVMs) up" : "serving"
+        }
+    }
+
+    /// Pure roll-up over the per-lane statuses (testable, no I/O).
+    /// `busyVMs` is a host-global count (same for every Tart-backed lane), so we
+    /// take the max rather than summing to avoid double-counting one VM.
+    static func from(_ statuses: [CIServingStatus]) -> RunnerHeaderState {
+        let installed = statuses.filter { $0.installed }
+        guard !installed.isEmpty else { return RunnerHeaderState(kind: .none, runningVMs: 0) }
+        // A toggle in flight (launchd loading/unloading) shows "updating…" in the
+        // header too, so it isn't briefly indistinguishable from "runner off".
+        if installed.contains(where: { $0.isToggling }) {
+            return RunnerHeaderState(kind: .updating, runningVMs: 0)
+        }
+        let serving = installed.filter { $0.serving }
+        guard !serving.isEmpty else { return RunnerHeaderState(kind: .off, runningVMs: 0) }
+        let vms = serving.map(\.busyVMs).max() ?? 0
+        return RunnerHeaderState(kind: .serving, runningVMs: vms)
     }
 }

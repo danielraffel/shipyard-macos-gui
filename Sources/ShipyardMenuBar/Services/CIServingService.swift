@@ -29,10 +29,21 @@ enum CIServingService {
 
     private static func runningVMCount() async -> Int {
         guard let tart = ShipyardProcessEnvironment.findExecutable(named: "tart") else { return 0 }
-        let tartHome = (NSHomeDirectory() as NSString).appendingPathComponent("VMs")
         let result = await run(
-            tart, ["list", "--format", "json"], extraEnv: ["TART_HOME": tartHome])
+            tart, ["list", "--format", "json"], extraEnv: ["TART_HOME": tartHome()])
         return parseRunningVMCount(result.stdout)
+    }
+
+    /// Where this Mac keeps its Tart VMs. Honor an explicit `TART_HOME` (a host
+    /// like the Mac Studio keeps VMs on an external volume, e.g.
+    /// `/Volumes/Workshop/VMs`, NOT `~/VMs`); fall back to `~/VMs` (the default
+    /// most hosts use). Counting the wrong directory was why the VM count could
+    /// read 0 on a Studio that actually had VMs running.
+    static func tartHome() -> String {
+        if let env = ProcessInfo.processInfo.environment["TART_HOME"], !env.isEmpty {
+            return env
+        }
+        return (NSHomeDirectory() as NSString).appendingPathComponent("VMs")
     }
 
     /// Pure parser (testable): count VMs reported running by `tart list --format json`.
