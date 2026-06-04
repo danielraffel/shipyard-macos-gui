@@ -80,7 +80,7 @@ struct CIServingStatus: Equatable {
 /// The header was conflating "is the app getting live data" with "is this Mac
 /// serving CI"; this is the second, distinct indicator.
 struct RunnerHeaderState: Equatable {
-    enum Kind: Equatable { case none, off, serving }
+    enum Kind: Equatable { case none, off, updating, serving }
     let kind: Kind
     let runningVMs: Int
 
@@ -89,9 +89,10 @@ struct RunnerHeaderState: Equatable {
 
     var label: String {
         switch kind {
-        case .none:    return ""
-        case .off:     return "runner off"
-        case .serving: return runningVMs > 0 ? "serving · \(runningVMs) up" : "serving"
+        case .none:     return ""
+        case .off:      return "runner off"
+        case .updating: return "updating…"
+        case .serving:  return runningVMs > 0 ? "serving · \(runningVMs) up" : "serving"
         }
     }
 
@@ -101,6 +102,11 @@ struct RunnerHeaderState: Equatable {
     static func from(_ statuses: [CIServingStatus]) -> RunnerHeaderState {
         let installed = statuses.filter { $0.installed }
         guard !installed.isEmpty else { return RunnerHeaderState(kind: .none, runningVMs: 0) }
+        // A toggle in flight (launchd loading/unloading) shows "updating…" in the
+        // header too, so it isn't briefly indistinguishable from "runner off".
+        if installed.contains(where: { $0.isToggling }) {
+            return RunnerHeaderState(kind: .updating, runningVMs: 0)
+        }
         let serving = installed.filter { $0.serving }
         guard !serving.isEmpty else { return RunnerHeaderState(kind: .off, runningVMs: 0) }
         let vms = serving.map(\.busyVMs).max() ?? 0

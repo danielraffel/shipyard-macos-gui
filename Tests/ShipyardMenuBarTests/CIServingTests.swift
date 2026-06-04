@@ -75,6 +75,27 @@ final class CIServingTests: XCTestCase {
         XCTAssertEqual(busy.label, "serving · 1 up")
     }
 
+    func testRunnerHeaderStateShowsUpdatingDuringToggle() {
+        // A toggle in flight must read "updating…" in the header, not "runner
+        // off" (installed + isToggling, serving not yet settled).
+        var toggling = CIServingStatus(installed: true, serving: false, busyVMs: 0)
+        toggling.isToggling = true
+        let state = RunnerHeaderState.from([toggling])
+        XCTAssertEqual(state.kind, .updating)
+        XCTAssertEqual(state.label, "updating…")
+        XCTAssertTrue(state.isVisible)
+    }
+
+    func testTartHomeHonorsEnvThenFallsBackToHomeVMs() {
+        // The env branch is the fix for the VM-count-reads-0 bug on hosts whose
+        // VMs live outside ~/VMs (e.g. a Mac Studio on /Volumes/Workshop/VMs).
+        setenv("TART_HOME", "/Volumes/Workshop/VMs", 1)
+        XCTAssertEqual(CIServingService.tartHome(), "/Volumes/Workshop/VMs")
+        unsetenv("TART_HOME")
+        XCTAssertTrue(CIServingService.tartHome().hasSuffix("/VMs"))
+        XCTAssertFalse(CIServingService.tartHome().hasPrefix("/Volumes/Workshop"))
+    }
+
     func testRunnerHeaderStateDoesNotDoubleCountHostGlobalVMCount() {
         // busyVMs is host-global (same number reported by every Tart-backed
         // lane), so the roll-up must take the max, not the sum.

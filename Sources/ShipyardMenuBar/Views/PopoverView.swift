@@ -136,7 +136,12 @@ struct PopoverView: View {
                     return (.orange, reason.headerLabel)
                 }
                 if store.liveStatus.blocksGitHubAPIPolling {
-                    return (.orange, reason?.headerLabel ?? "updates paused")
+                    // Always say "updates paused" here — PollingReason.headerLabel
+                    // returns the generic "paused" for most degraded cases
+                    // (e.g. Tailscale down), which is exactly the wording that
+                    // read as "the app/runner is paused". The specific reason is
+                    // in the tooltip + Settings.
+                    return (.orange, "updates paused")
                 }
                 return (.secondary, "polling")
             }
@@ -160,9 +165,10 @@ struct PopoverView: View {
         if state.isVisible {
             let (icon, color): (String, Color) = {
                 switch state.kind {
-                case .serving: return ("play.circle.fill", ShipyardColors.green)
-                case .off:     return ("pause.circle", .secondary)
-                case .none:    return ("", .secondary)
+                case .serving:  return ("play.circle.fill", ShipyardColors.green)
+                case .updating: return ("arrow.triangle.2.circlepath", .secondary)
+                case .off:      return ("pause.circle", .secondary)
+                case .none:     return ("", .secondary)
                 }
             }()
             HStack(spacing: 3) {
