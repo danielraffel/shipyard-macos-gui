@@ -1166,6 +1166,10 @@ final class AppStore: ObservableObject {
             if deferredStartupWorkStarted {
                 Task { [weak self] in await self?.reconcileLiveMode() }
             }
+            // Runner building/waiting is computed against knownRepos, so recompute
+            // it when the repo set grows (e.g. the first snapshot after launch) —
+            // otherwise a serving lane reads idle until the next manual refresh.
+            refreshServingStatus()
         }
         reseedAutoExpand()
         detectBadgeTransition()

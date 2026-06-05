@@ -39,32 +39,39 @@ enum CIServingService {
         guard !labels.isEmpty,
               let gh = ShipyardProcessEnvironment.findExecutable(named: "gh")
         else { return (0, 0) }
-        var building = 0, waiting = 0
+        // Dedupe by runner id ACROSS repos: a self-hosted/org runner can appear
+        // in more than one repo's listing, and summing per-repo would inflate the
+        // building/waiting counts. Key by stable id; last-write of `busy` wins.
+        var busyById: [String: Bool] = [:]
         for repo in repos {
             // `--paginate --slurp` walks every page (pools can exceed the 100/page
-            // REST max) and wraps the page objects in a JSON array. parseRunnerActivity
+            // REST max) and wraps the page objects in a JSON array. matchingRunners
             // handles that array, a single page object, or a bare runner array.
             let result = await run(gh, ["api", "--paginate", "--slurp",
                                         "repos/\(repo)/actions/runners?per_page=100"])
             guard result.exitCode == 0 else { continue }
-            let counts = parseRunnerActivity(result.stdout, laneLabels: labels)
-            building += counts.building
-            waiting += counts.waiting
+            for runner in matchingRunners(result.stdout, laneLabels: labels) {
+                busyById[runner.id] = runner.busy
+            }
         }
+        let building = busyById.values.filter { $0 }.count
+        let waiting = busyById.values.filter { !$0 }.count
         return (building, waiting)
     }
 
-    /// Pure parser (testable): count online runners whose labels ⊇ `laneLabels`
-    /// (this lane on this machine), split into busy (building) and idle (waiting).
+    struct MatchedRunner: Equatable { let id: String; let busy: Bool }
+
+    /// Online runners whose labels ⊇ `laneLabels` (this lane on this machine),
+    /// each with its stable id + busy flag (so callers can dedupe across repos).
     /// Case-insensitive (GitHub capitalizes default labels like `macOS`/`ARM64`).
     /// Accepts the `gh api --paginate --slurp` array of page objects, a single
     /// `{runners:[…]}` page, or a bare array of runners.
-    static func parseRunnerActivity(_ json: String, laneLabels: [String]) -> (building: Int, waiting: Int) {
+    static func matchingRunners(_ json: String, laneLabels: [String]) -> [MatchedRunner] {
         let want = Set(laneLabels.map { $0.lowercased() })
         guard !want.isEmpty,
               let data = json.data(using: .utf8),
               let top = try? JSONSerialization.jsonObject(with: data)
-        else { return (0, 0) }
+        else { return [] }
 
         var runners: [[String: Any]] = []
         if let page = top as? [String: Any] {
@@ -79,15 +86,25 @@ enum CIServingService {
             }
         }
 
-        var building = 0, waiting = 0
+        var out: [MatchedRunner] = []
         for runner in runners {
             guard (runner["status"] as? String)?.lowercased() == "online" else { continue }
             let have = Set(((runner["labels"] as? [[String: Any]]) ?? [])
                 .compactMap { ($0["name"] as? String)?.lowercased() })
             guard want.isSubset(of: have) else { continue }
-            if (runner["busy"] as? Bool) == true { building += 1 } else { waiting += 1 }
+            let id = (runner["id"] as? Int).map(String.init)
+                ?? (runner["name"] as? String)
+                ?? UUID().uuidString
+            out.append(MatchedRunner(id: id, busy: (runner["busy"] as? Bool) == true))
         }
-        return (building, waiting)
+        return out
+    }
+
+    /// Counts split for a single JSON payload (testable). Multi-repo dedup lives
+    /// in `activity(for:repos:)`.
+    static func parseRunnerActivity(_ json: String, laneLabels: [String]) -> (building: Int, waiting: Int) {
+        let matched = matchingRunners(json, laneLabels: laneLabels)
+        return (matched.filter { $0.busy }.count, matched.filter { !$0.busy }.count)
     }
 
     private struct ProcResult { let stdout: String; let exitCode: Int32 }

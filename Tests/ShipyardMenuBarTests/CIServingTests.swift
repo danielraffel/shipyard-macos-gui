@@ -138,6 +138,18 @@ final class CIServingTests: XCTestCase {
         XCTAssertEqual(waiting, 1)
     }
 
+    func testMatchingRunnersReturnIdsForCrossRepoDedup() {
+        // Same runner id appearing in two repo listings must be dedup-able by the
+        // caller (activity sums into a dict keyed by id) — here we assert the
+        // matcher surfaces a stable id + busy flag.
+        let matched = CIServingService.matchingRunners(
+            runnersJSON, laneLabels: ["self-hosted", "macos", "arm64", "pulp-build", "pulp-build-m5"])
+        // ephr-1 (busy) + ephr-2 (idle); studio + offline excluded.
+        XCTAssertEqual(matched.count, 2)
+        XCTAssertEqual(matched.filter { $0.busy }.count, 1)
+        XCTAssertTrue(matched.allSatisfy { !$0.id.isEmpty })
+    }
+
     func testParseRunnerActivityEmptyInputs() {
         XCTAssertEqual(CIServingService.parseRunnerActivity("", laneLabels: ["x"]).building, 0)
         XCTAssertEqual(CIServingService.parseRunnerActivity("{}", laneLabels: ["x"]).waiting, 0)
