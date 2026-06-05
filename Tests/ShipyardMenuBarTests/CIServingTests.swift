@@ -119,6 +119,25 @@ final class CIServingTests: XCTestCase {
         XCTAssertEqual(waiting, 0)
     }
 
+    func testParseRunnerActivityHandlesPaginatedSlurpArray() {
+        // `gh api --paginate --slurp` wraps page objects in an array; a busy
+        // runner on page 2 must still be counted (the per_page=100 bug).
+        let slurped = """
+        [
+          {"total_count":100,"runners":[
+            {"name":"p1","status":"online","busy":false,
+             "labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"ARM64"},{"name":"pulp-build-linux"}]}]},
+          {"total_count":100,"runners":[
+            {"name":"p2","status":"online","busy":true,
+             "labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"ARM64"},{"name":"pulp-build-linux"}]}]}
+        ]
+        """
+        let (building, waiting) = CIServingService.parseRunnerActivity(
+            slurped, laneLabels: ["self-hosted", "linux", "arm64", "pulp-build-linux"])
+        XCTAssertEqual(building, 1)   // the page-2 busy runner
+        XCTAssertEqual(waiting, 1)
+    }
+
     func testParseRunnerActivityEmptyInputs() {
         XCTAssertEqual(CIServingService.parseRunnerActivity("", laneLabels: ["x"]).building, 0)
         XCTAssertEqual(CIServingService.parseRunnerActivity("{}", laneLabels: ["x"]).waiting, 0)

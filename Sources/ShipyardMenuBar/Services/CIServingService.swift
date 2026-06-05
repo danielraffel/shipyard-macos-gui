@@ -41,7 +41,11 @@ enum CIServingService {
         else { return (0, 0) }
         var building = 0, waiting = 0
         for repo in repos {
-            let result = await run(gh, ["api", "repos/\(repo)/actions/runners?per_page=100"])
+            // `--paginate --slurp` walks every page (pools can exceed the 100/page
+            // REST max) and wraps the page objects in a JSON array. parseRunnerActivity
+            // handles that array, a single page object, or a bare runner array.
+            let result = await run(gh, ["api", "--paginate", "--slurp",
+                                        "repos/\(repo)/actions/runners?per_page=100"])
             guard result.exitCode == 0 else { continue }
             let counts = parseRunnerActivity(result.stdout, laneLabels: labels)
             building += counts.building
@@ -50,17 +54,31 @@ enum CIServingService {
         return (building, waiting)
     }
 
-    /// Pure parser (testable): from the `actions/runners` JSON, count online
-    /// runners whose labels ⊇ `laneLabels` (this lane on this machine), split
-    /// into busy (building) and idle (waiting). Case-insensitive (GitHub
-    /// capitalizes default labels like `macOS`/`ARM64`).
+    /// Pure parser (testable): count online runners whose labels ⊇ `laneLabels`
+    /// (this lane on this machine), split into busy (building) and idle (waiting).
+    /// Case-insensitive (GitHub capitalizes default labels like `macOS`/`ARM64`).
+    /// Accepts the `gh api --paginate --slurp` array of page objects, a single
+    /// `{runners:[…]}` page, or a bare array of runners.
     static func parseRunnerActivity(_ json: String, laneLabels: [String]) -> (building: Int, waiting: Int) {
-        guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let runners = obj["runners"] as? [[String: Any]]
-        else { return (0, 0) }
         let want = Set(laneLabels.map { $0.lowercased() })
-        guard !want.isEmpty else { return (0, 0) }
+        guard !want.isEmpty,
+              let data = json.data(using: .utf8),
+              let top = try? JSONSerialization.jsonObject(with: data)
+        else { return (0, 0) }
+
+        var runners: [[String: Any]] = []
+        if let page = top as? [String: Any] {
+            runners = page["runners"] as? [[String: Any]] ?? []
+        } else if let array = top as? [[String: Any]] {
+            for element in array {
+                if let pageRunners = element["runners"] as? [[String: Any]] {
+                    runners += pageRunners                       // a page object
+                } else if element["labels"] != nil || element["status"] != nil {
+                    runners.append(element)                      // a bare runner
+                }
+            }
+        }
+
         var building = 0, waiting = 0
         for runner in runners {
             guard (runner["status"] as? String)?.lowercased() == "online" else { continue }
