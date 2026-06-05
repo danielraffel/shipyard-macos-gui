@@ -432,7 +432,9 @@ struct SettingsView: View {
 
     private func serveStatusColor(_ status: CIServingStatus) -> Color {
         guard status.serving else { return .secondary }
-        return status.isBusy ? .orange : .green
+        if status.building > 0 { return .green }   // a build is actually running
+        if status.waiting > 0 { return .orange }   // serving, warm VM waiting for work
+        return .secondary                          // serving, nothing up (idle)
     }
 
     // MARK: - Run local smoke checks (emulated x86_64)
@@ -485,13 +487,16 @@ struct SettingsView: View {
     }
 
     private func handleServeToggle(_ on: Bool, lane: CIServingLane, status: CIServingStatus) {
-        // Confirm before yanking the pool out from under an in-flight build.
-        if !on && status.isBusy {
+        // Only warn about cancelling a build when one is REALLY running (a busy
+        // runner), not when the lane is merely serving a warm/idle VM — and name
+        // the platform so it's clear which lane you're stopping.
+        if !on && status.building > 0 {
+            let n = status.building
             let alert = NSAlert()
-            alert.messageText = "A build is running on this Mac"
-            let n = status.busyVMs
+            alert.messageText = "A \(lane.platform) build is running on this Mac"
             alert.informativeText =
-                "Turning off pool participation now will cancel \(n) in-progress build\(n == 1 ? "" : "s"). Stop anyway?"
+                "Turning off \(lane.platform) pool participation now will cancel "
+                + "\(n) in-progress \(lane.platform) build\(n == 1 ? "" : "s"). Stop anyway?"
             alert.addButton(withTitle: "Stop Now")
             alert.addButton(withTitle: "Keep Serving")
             if alert.runModal() == .alertFirstButtonReturn {
@@ -499,6 +504,8 @@ struct SettingsView: View {
             }
             // Otherwise leave it serving; the toggle reverts on next refresh.
         } else {
+            // Idle / waiting / turning on → no destructive prompt; a warm VM
+            // waiting for work isn't an in-progress build.
             store.setServing(on, lane: lane)
         }
     }

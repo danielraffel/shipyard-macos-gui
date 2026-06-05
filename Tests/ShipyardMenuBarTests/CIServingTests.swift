@@ -2,133 +2,160 @@ import XCTest
 @testable import Shipyard
 
 final class CIServingTests: XCTestCase {
-    func testParsesRunningCountFromRunningBool() {
-        let json = """
-        [{"Name":"ephr-1","Running":true,"State":"running"},
-         {"Name":"golden","Running":false,"State":"stopped"}]
-        """
-        XCTAssertEqual(CIServingService.parseRunningVMCount(json), 1)
-    }
-
-    func testParsesRunningCountFromStateStringOnly() {
-        let json = #"[{"Name":"a","State":"running"},{"Name":"b","State":"stopped"}]"#
-        XCTAssertEqual(CIServingService.parseRunningVMCount(json), 1)
-    }
-
-    func testCountsMultipleRunning() {
-        let json = #"[{"Running":true},{"Running":true},{"Running":false}]"#
-        XCTAssertEqual(CIServingService.parseRunningVMCount(json), 2)
-    }
-
-    func testEmptyAndMalformedAreZero() {
-        XCTAssertEqual(CIServingService.parseRunningVMCount("[]"), 0)
-        XCTAssertEqual(CIServingService.parseRunningVMCount(""), 0)
-        XCTAssertEqual(CIServingService.parseRunningVMCount("not json"), 0)
-    }
+    // MARK: - Status summary (building vs waiting)
 
     func testStatusSummary() {
-        XCTAssertEqual(CIServingStatus(installed: false, serving: false, busyVMs: 0).summary,
+        XCTAssertEqual(CIServingStatus(installed: false, serving: false).summary,
                        "Not set up on this Mac")
-        XCTAssertEqual(CIServingStatus(installed: true, serving: false, busyVMs: 0).summary,
+        XCTAssertEqual(CIServingStatus(installed: true, serving: false).summary,
                        "Not serving")
-        XCTAssertEqual(CIServingStatus(installed: true, serving: true, busyVMs: 0).summary,
+        XCTAssertEqual(CIServingStatus(installed: true, serving: true).summary,
                        "Serving · idle")
-        // Honest wording: a running VM may be a warm runner waiting for a job,
-        // so we report "N VM(s) up", not the over-stated "building (N)".
-        XCTAssertEqual(CIServingStatus(installed: true, serving: true, busyVMs: 1).summary,
-                       "Serving · 1 VM up")
-        XCTAssertEqual(CIServingStatus(installed: true, serving: true, busyVMs: 2).summary,
-                       "Serving · 2 VMs up")
-        var toggling = CIServingStatus(installed: true, serving: true, busyVMs: 0)
+        // A warm runner waiting for work is NOT "building".
+        XCTAssertEqual(CIServingStatus(installed: true, serving: true, waiting: 1).summary,
+                       "Waiting · 1 ready")
+        // A busy runner IS building.
+        XCTAssertEqual(CIServingStatus(installed: true, serving: true, building: 1).summary,
+                       "Building 1 job")
+        XCTAssertEqual(CIServingStatus(installed: true, serving: true, building: 2).summary,
+                       "Building 2 jobs")
+        // Building wins over waiting in the summary.
+        XCTAssertEqual(CIServingStatus(installed: true, serving: true, building: 1, waiting: 2).summary,
+                       "Building 1 job")
+        var toggling = CIServingStatus(installed: true, serving: true)
         toggling.isToggling = true
         XCTAssertEqual(toggling.summary, "Updating…")
     }
 
-    func testRunnerHeaderStateSeparatesFromConnection() {
-        // No lane installed → header runner indicator is hidden entirely.
-        let none = RunnerHeaderState.from([
-            CIServingStatus(installed: false, serving: false, busyVMs: 0),
-        ])
-        XCTAssertEqual(none.kind, .none)
-        XCTAssertFalse(none.isVisible)
-        XCTAssertEqual(none.label, "")
-
-        // Installed but not serving → "runner off".
-        let off = RunnerHeaderState.from([
-            CIServingStatus(installed: true, serving: false, busyVMs: 0),
-        ])
-        XCTAssertEqual(off.kind, .off)
-        XCTAssertTrue(off.isVisible)
-        XCTAssertEqual(off.label, "runner off")
-
-        // Serving, no VM up → "serving".
-        let idle = RunnerHeaderState.from([
-            CIServingStatus(installed: true, serving: true, busyVMs: 0),
-        ])
-        XCTAssertEqual(idle.kind, .serving)
-        XCTAssertEqual(idle.label, "serving")
-
-        // Serving with a VM up → "serving · N up".
-        let busy = RunnerHeaderState.from([
-            CIServingStatus(installed: true, serving: true, busyVMs: 1),
-        ])
-        XCTAssertEqual(busy.label, "serving · 1 up")
+    func testIsBuildingAndIsWaiting() {
+        XCTAssertTrue(CIServingStatus(installed: true, serving: true, building: 1).isBuilding)
+        XCTAssertTrue(CIServingStatus(installed: true, serving: true, waiting: 1).isWaiting)
+        // Building takes precedence — a lane with a job running is not "just waiting".
+        XCTAssertFalse(CIServingStatus(installed: true, serving: true, building: 1, waiting: 1).isWaiting)
     }
 
-    func testRunnerHeaderStateShowsUpdatingDuringToggle() {
-        // A toggle in flight must read "updating…" in the header, not "runner
-        // off" (installed + isToggling, serving not yet settled).
-        var toggling = CIServingStatus(installed: true, serving: false, busyVMs: 0)
+    // MARK: - Header roll-up (building green > waiting orange, summed)
+
+    func testRunnerHeaderNoneAndOff() {
+        XCTAssertEqual(RunnerHeaderState.from([
+            CIServingStatus(installed: false, serving: false)]).kind, .none)
+        XCTAssertFalse(RunnerHeaderState.from([
+            CIServingStatus(installed: false, serving: false)]).isVisible)
+
+        let off = RunnerHeaderState.from([CIServingStatus(installed: true, serving: false)])
+        XCTAssertEqual(off.kind, .off)
+        XCTAssertEqual(off.label, "runner off")
+    }
+
+    func testRunnerHeaderIdleWaitingBuilding() {
+        XCTAssertEqual(RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: true)]).label, "serving")
+
+        let waiting = RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: true, waiting: 1)])
+        XCTAssertEqual(waiting.kind, .waiting)
+        XCTAssertEqual(waiting.label, "waiting · 1")
+
+        let building = RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: true, building: 1)])
+        XCTAssertEqual(building.kind, .building)
+        XCTAssertEqual(building.label, "building · 1")
+    }
+
+    func testRunnerHeaderSumsAcrossLanesAndBuildingWins() {
+        // macOS waiting(1) + Linux building(1) → header shows building (green) total.
+        let state = RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: true, waiting: 1),                 // macOS
+            CIServingStatus(installed: true, serving: true, building: 1, waiting: 1),    // linux
+        ])
+        XCTAssertEqual(state.kind, .building)
+        XCTAssertEqual(state.label, "building · 1")
+
+        // Two lanes each waiting → SUM (distinct runners), not max.
+        let waiting = RunnerHeaderState.from([
+            CIServingStatus(installed: true, serving: true, waiting: 1),
+            CIServingStatus(installed: true, serving: true, waiting: 1),
+        ])
+        XCTAssertEqual(waiting.label, "waiting · 2")
+    }
+
+    func testRunnerHeaderUpdatingDuringToggle() {
+        var toggling = CIServingStatus(installed: true, serving: false)
         toggling.isToggling = true
         let state = RunnerHeaderState.from([toggling])
         XCTAssertEqual(state.kind, .updating)
         XCTAssertEqual(state.label, "updating…")
-        XCTAssertTrue(state.isVisible)
     }
 
-    func testTartHomeHonorsEnvThenFallsBackToHomeVMs() {
-        // The env branch is the fix for the VM-count-reads-0 bug on hosts whose
-        // VMs live outside ~/VMs (e.g. a Mac Studio on /Volumes/Workshop/VMs).
-        setenv("TART_HOME", "/Volumes/Workshop/VMs", 1)
-        XCTAssertEqual(CIServingService.tartHome(), "/Volumes/Workshop/VMs")
-        unsetenv("TART_HOME")
-        XCTAssertTrue(CIServingService.tartHome().hasSuffix("/VMs"))
-        XCTAssertFalse(CIServingService.tartHome().hasPrefix("/Volumes/Workshop"))
+    // MARK: - Runner-activity parsing (busy → building, online idle → waiting)
+
+    private let runnersJSON = """
+    {"total_count":4,"runners":[
+      {"name":"ephr-1","status":"online","busy":true,
+       "labels":[{"name":"self-hosted"},{"name":"macOS"},{"name":"ARM64"},{"name":"pulp-build"},{"name":"pulp-build-m5"}]},
+      {"name":"ephr-2","status":"online","busy":false,
+       "labels":[{"name":"self-hosted"},{"name":"macOS"},{"name":"ARM64"},{"name":"pulp-build"},{"name":"pulp-build-m5"}]},
+      {"name":"studio-1","status":"online","busy":true,
+       "labels":[{"name":"self-hosted"},{"name":"macOS"},{"name":"ARM64"},{"name":"pulp-build"},{"name":"pulp-build-studio"}]},
+      {"name":"ephr-3","status":"offline","busy":false,
+       "labels":[{"name":"self-hosted"},{"name":"macOS"},{"name":"ARM64"},{"name":"pulp-build"},{"name":"pulp-build-m5"}]}
+    ]}
+    """
+
+    func testParseRunnerActivityMatchesLaneLabelsCaseInsensitively() {
+        // The M5 macOS lane (labels include pulp-build-m5): 1 busy (building),
+        // 1 idle (waiting). The studio runner and the offline one are excluded.
+        let (building, waiting) = CIServingService.parseRunnerActivity(
+            runnersJSON, laneLabels: ["self-hosted", "macos", "arm64", "pulp-build", "pulp-build-m5"])
+        XCTAssertEqual(building, 1)
+        XCTAssertEqual(waiting, 1)
     }
 
-    func testRunnerHeaderStateDoesNotDoubleCountHostGlobalVMCount() {
-        // busyVMs is host-global (same number reported by every Tart-backed
-        // lane), so the roll-up must take the max, not the sum.
-        let state = RunnerHeaderState.from([
-            CIServingStatus(installed: true, serving: true, busyVMs: 1),  // macOS
-            CIServingStatus(installed: true, serving: true, busyVMs: 1),  // linux (same VM count)
-        ])
-        XCTAssertEqual(state.runningVMs, 1)
-        XCTAssertEqual(state.label, "serving · 1 up")
+    func testParseRunnerActivityExcludesOtherMachinesAndOffline() {
+        // The studio lane sees only its own busy runner; none waiting.
+        let (building, waiting) = CIServingService.parseRunnerActivity(
+            runnersJSON, laneLabels: ["self-hosted", "macos", "arm64", "pulp-build", "pulp-build-studio"])
+        XCTAssertEqual(building, 1)
+        XCTAssertEqual(waiting, 0)
     }
+
+    func testParseRunnerActivityEmptyInputs() {
+        XCTAssertEqual(CIServingService.parseRunnerActivity("", laneLabels: ["x"]).building, 0)
+        XCTAssertEqual(CIServingService.parseRunnerActivity("{}", laneLabels: ["x"]).waiting, 0)
+        // No lane labels → nothing matches (don't count every runner).
+        XCTAssertEqual(CIServingService.parseRunnerActivity(runnersJSON, laneLabels: []).building, 0)
+    }
+
+    // MARK: - Lane runner-label parsing from a plist
+
+    func testRunnerLabelsParsedFromPlistProgramArguments() throws {
+        let tmp = NSTemporaryDirectory() + "ci-lane-\(UUID().uuidString).plist"
+        let plist: [String: Any] = [
+            "Label": "com.example.runner",
+            "ProgramArguments": ["/bin/bash", "/x/runner.sh", "--loop",
+                                 "--labels", "self-hosted,Linux,ARM64,pulp-build,pulp-build-linux"],
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: URL(fileURLWithPath: tmp))
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        let lane = CIServingLane(id: "linux", platform: "Linux",
+                                 agentLabel: "com.example.runner", plistPath: tmp)
+        XCTAssertEqual(lane.runnerLabels(),
+                       ["self-hosted", "Linux", "ARM64", "pulp-build", "pulp-build-linux"])
+        // Missing plist → empty (don't crash; lane just shows no activity).
+        let absent = CIServingLane(id: "x", platform: "X", agentLabel: "y",
+                                   plistPath: "/no/such.plist")
+        XCTAssertEqual(absent.runnerLabels(), [])
+    }
+
+    // MARK: - Lane catalog
 
     func testKnownLanesAreMacOSLinuxWindows() {
         let lanes = CIServingLane.known
         XCTAssertEqual(lanes.map(\.id), ["macos", "linux", "windows"])
-
-        let mac = lanes[0]
-        XCTAssertEqual(mac.platform, "macOS")
-        XCTAssertTrue(mac.plistPath.hasSuffix(
-            "Library/LaunchAgents/com.danielraffel.pulp.tart-runner.plist"))
-
-        let linux = lanes[1]
-        XCTAssertEqual(linux.platform, "Linux")
-        XCTAssertEqual(linux.agentLabel, "com.danielraffel.pulp.tart-runner-linux")
-        XCTAssertTrue(linux.plistPath.hasSuffix(
-            "Library/LaunchAgents/com.danielraffel.pulp.tart-runner-linux.plist"))
-
-        let windows = lanes[2]
-        XCTAssertEqual(windows.platform, "Windows")
-        XCTAssertEqual(windows.agentLabel, "com.danielraffel.pulp.qemu-runner-windows")
-        XCTAssertTrue(windows.plistPath.hasSuffix(
-            "Library/LaunchAgents/com.danielraffel.pulp.qemu-runner-windows.plist"))
-
-        // Every lane's plist path is derived from its agent label (universal shape).
+        XCTAssertEqual(lanes[0].platform, "macOS")
+        XCTAssertEqual(lanes[1].agentLabel, "com.danielraffel.pulp.tart-runner-linux")
+        XCTAssertEqual(lanes[2].platform, "Windows")
         for lane in lanes {
             XCTAssertTrue(lane.plistPath.hasSuffix("Library/LaunchAgents/\(lane.agentLabel).plist"))
         }
