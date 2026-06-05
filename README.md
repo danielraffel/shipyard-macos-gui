@@ -49,13 +49,29 @@ unavailable, or **Off** to force polling. Webhook events route through
 Tailscale's edge directly to your Mac — no Shipyard-operated backend in
 between.
 
-Webhook registration needs the GitHub CLI token to be allowed to manage repo
-hooks. If that scope is missing, the app pauses GitHub API polling and shows a
-copy button for:
+Webhook registration needs the token Shipyard uses to be allowed to manage repo
+hooks. **How you grant that depends on which kind of token you authenticate
+with** — the in-app hint only covers the first case:
 
-```bash
-gh auth refresh -h github.com -s admin:repo_hook
-```
+- **User PAT / OAuth (the default `gh auth login`):** grant the
+  `admin:repo_hook` scope. The app shows a copy button for:
+
+  ```bash
+  gh auth refresh -h github.com -s admin:repo_hook
+  ```
+
+- **GitHub App installation token** (e.g. a `[github.auth] token_command`
+  helper in `shipyard`'s config): installation tokens have **App permissions**,
+  not OAuth scopes, so `gh auth refresh -s admin:repo_hook` does nothing. Instead,
+  on the GitHub App, add **Repository permissions → Webhooks → Read & write**,
+  then approve the updated permission on the installation. Because installation
+  tokens bake in their permissions at mint time (~1 h TTL), **restart the daemon
+  afterward** (quit + reopen Shipyard) so it mints a fresh token that includes
+  the new permission — otherwise webhook creation keeps failing with
+  `403 "Resource not accessible by integration"` until the cached token expires.
+
+If neither is satisfied the app pauses GitHub API polling (the header shows
+"updates paused") and live updates stay off until webhooks can register.
 
 ## Download
 
