@@ -165,7 +165,9 @@ struct PopoverView: View {
         if state.isVisible {
             let (icon, color): (String, Color) = {
                 switch state.kind {
-                case .serving:  return ("play.circle.fill", ShipyardColors.green)
+                case .building: return ("play.circle.fill", ShipyardColors.green)   // a job is running
+                case .waiting:  return ("clock.fill", .orange)                       // warm, waiting for work
+                case .idle:     return ("play.circle", .secondary)                   // serving, nothing up
                 case .updating: return ("arrow.triangle.2.circlepath", .secondary)
                 case .off:      return ("pause.circle", .secondary)
                 case .none:     return ("", .secondary)
@@ -179,7 +181,7 @@ struct PopoverView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
-            .help("Runner state — whether this Mac is in the CI pool serving builds. Toggle in Settings → Serve CI builds from this Mac. A VM shown here may be a warm runner waiting for a job, not actively building.")
+            .help("Runner state for this Mac (separate from the connection dot). Green = a build is running; orange = serving but waiting (a warm VM ready for jobs / overflow); grey = serving, idle or off. Toggle lanes in Settings → Serve CI builds from this Mac.")
         }
     }
 }

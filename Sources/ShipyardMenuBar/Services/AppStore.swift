@@ -1166,6 +1166,10 @@ final class AppStore: ObservableObject {
             if deferredStartupWorkStarted {
                 Task { [weak self] in await self?.reconcileLiveMode() }
             }
+            // Runner building/waiting is computed against knownRepos, so recompute
+            // it when the repo set grows (e.g. the first snapshot after launch) —
+            // otherwise a serving lane reads idle until the next manual refresh.
+            refreshServingStatus()
         }
         reseedAutoExpand()
         detectBadgeTransition()
@@ -1274,15 +1278,22 @@ final class AppStore: ObservableObject {
         RunnerHeaderState.from(CIServingLane.known.map { status(for: $0) })
     }
 
-    /// Re-read each lane's installed / serving / busy status.
+    /// Re-read each lane's installed / serving status, plus its building/waiting
+    /// activity (from the GitHub runner state) for the repos this Mac knows about.
     func refreshServingStatus() {
         servingRefreshTask?.cancel()
+        let repos = Array(knownRepos)
         servingRefreshTask = Task { [weak self] in
             guard let self else { return }
             var next: [String: CIServingStatus] = [:]
             for lane in CIServingLane.known {
                 let toggling = self.servingStatusByLane[lane.id]?.isToggling ?? false
                 var status = await CIServingService.status(for: lane)
+                if status.serving {
+                    let activity = await CIServingService.activity(for: lane, repos: repos)
+                    status.building = activity.building
+                    status.waiting = activity.waiting
+                }
                 status.isToggling = toggling
                 next[lane.id] = status
             }
@@ -1297,11 +1308,17 @@ final class AppStore: ObservableObject {
         var status = servingStatusByLane[lane.id] ?? .unknown
         status.isToggling = true
         servingStatusByLane[lane.id] = status
+        let repos = Array(knownRepos)
         servingToggleTasks[lane.id] = Task { [weak self] in
             _ = await CIServingService.setServing(on, lane: lane)
             guard let self else { return }
             // launchd settles asynchronously; re-read the true state.
             var fresh = await CIServingService.status(for: lane)
+            if fresh.serving {
+                let activity = await CIServingService.activity(for: lane, repos: repos)
+                fresh.building = activity.building
+                fresh.waiting = activity.waiting
+            }
             fresh.isToggling = false
             guard !Task.isCancelled else { return }
             self.servingStatusByLane[lane.id] = fresh
