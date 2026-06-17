@@ -10,15 +10,10 @@ import Foundation
 /// `tart-runner-linux` / `qemu-runner-windows` supervisors for the VM lanes);
 /// an un-installed lane renders as "Not set up on this Mac".
 struct CIServingLane: Identifiable, Equatable {
-    let id: String           // stable key, e.g. "macos"
-    let platform: String     // display name, e.g. "macOS"
+    let id: String           // stable key = the launchd label (unique per lane)
+    let platform: String     // display name, e.g. "macOS · gate"
     let agentLabel: String   // launchd label
     let plistPath: String    // ~/Library/LaunchAgents/<label>.plist
-
-    private static func agentPlist(_ label: String) -> String {
-        (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
-    }
 
     /// The GitHub Actions runner labels this lane registers with on THIS machine,
     /// read from the installed agent plist's `--labels` argument (e.g.
@@ -39,30 +34,56 @@ struct CIServingLane: Identifiable, Equatable {
             .filter { !$0.isEmpty }
     }
 
-    /// Lanes this build of the app knows how to toggle — one row per platform.
-    /// Each is opt-in/out independently, so you can serve macOS but not Linux,
-    /// or pause any of them while you're working, without overwhelming the Mac.
-    static var known: [CIServingLane] {
-        [
-            CIServingLane(
-                id: "macos",
-                platform: "macOS",
-                agentLabel: "com.danielraffel.pulp.tart-runner",
-                plistPath: agentPlist("com.danielraffel.pulp.tart-runner")
-            ),
-            CIServingLane(
-                id: "linux",
-                platform: "Linux",
-                agentLabel: "com.danielraffel.pulp.tart-runner-linux",
-                plistPath: agentPlist("com.danielraffel.pulp.tart-runner-linux")
-            ),
-            CIServingLane(
-                id: "windows",
-                platform: "Windows",
-                agentLabel: "com.danielraffel.pulp.qemu-runner-windows",
-                plistPath: agentPlist("com.danielraffel.pulp.qemu-runner-windows")
-            ),
-        ]
+    /// Lanes this build of the app knows how to toggle — one row per *installed*
+    /// runner agent. Discovered from this host's own LaunchAgents (below), so any
+    /// host shows its real runners (M1 = sanitizer, Studio = gate, …) instead of
+    /// assuming the gate/linux/windows runners exist. Each is opt-in/out
+    /// independently, so you can pause any of them while you're working.
+    static var known: [CIServingLane] { discover() }
+
+    /// Discover installed runner lanes by scanning `~/Library/LaunchAgents` for
+    /// `com.danielraffel.pulp.*{tart,qemu}-runner*.plist`. Sorted for stable order.
+    static func discover(
+        agentsDirectory: String = (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/LaunchAgents"),
+        fileManager: FileManager = .default
+    ) -> [CIServingLane] {
+        guard let files = try? fileManager.contentsOfDirectory(atPath: agentsDirectory)
+        else { return [] }
+        return files
+            .filter { filename in
+                guard filename.hasPrefix("com.danielraffel.pulp.") && filename.hasSuffix(".plist")
+                    && (filename.contains("tart-runner") || filename.contains("qemu-runner"))
+                else { return false }
+                // Exclude a directory that merely happens to be named *.plist — it
+                // would otherwise become a phantom "installed" lane with no labels.
+                var isDir: ObjCBool = false
+                let full = (agentsDirectory as NSString).appendingPathComponent(filename)
+                return fileManager.fileExists(atPath: full, isDirectory: &isDir) && !isDir.boolValue
+            }
+            .map { filename in
+                let label = String(filename.dropLast(".plist".count))
+                return CIServingLane(
+                    id: label,
+                    platform: laneName(for: label),
+                    agentLabel: label,
+                    plistPath: (agentsDirectory as NSString).appendingPathComponent(filename))
+            }
+            .sorted { ($0.platform, $0.id) < ($1.platform, $1.id) }
+    }
+
+    /// Human lane name inferred from the agent label.
+    static func laneName(for label: String) -> String {
+        let suffix = label.replacingOccurrences(of: "com.danielraffel.pulp.", with: "")
+        if suffix.contains("qemu") { return "Windows" }
+        if suffix.contains("linux") { return "Linux" }
+        if suffix.contains("sanitizer") { return "macOS · sanitizer" }
+        if suffix.contains("coverage") { return "macOS · coverage" }
+        if suffix.contains("release") { return "macOS · release" }
+        // Name the plain gate runner so it's distinct from the other macOS lanes;
+        // any other unknown macOS lane keeps its label suffix to avoid collisions.
+        if suffix == "tart-runner" { return "macOS · gate" }
+        return "macOS · \(suffix)"
     }
 }
 

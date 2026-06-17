@@ -1265,7 +1265,8 @@ final class AppStore: ObservableObject {
     private var servingRefreshTask: Task<Void, Never>?
     private var servingToggleTasks: [String: Task<Void, Never>] = [:]
 
-    /// All known lanes (today: macOS only).
+    /// Lanes installed on THIS host, discovered from its own runner LaunchAgents
+    /// (so M1 shows its sanitizer lane, the Studio its gate lane, etc.).
     var servingLanes: [CIServingLane] { CIServingLane.known }
 
     func status(for lane: CIServingLane) -> CIServingStatus {

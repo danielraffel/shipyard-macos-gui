@@ -179,16 +179,53 @@ final class CIServingTests: XCTestCase {
         XCTAssertEqual(absent.runnerLabels(), [])
     }
 
-    // MARK: - Lane catalog
+    // MARK: - Lane catalog (per-host discovery from LaunchAgents)
 
-    func testKnownLanesAreMacOSLinuxWindows() {
-        let lanes = CIServingLane.known
-        XCTAssertEqual(lanes.map(\.id), ["macos", "linux", "windows"])
-        XCTAssertEqual(lanes[0].platform, "macOS")
-        XCTAssertEqual(lanes[1].agentLabel, "com.danielraffel.pulp.tart-runner-linux")
-        XCTAssertEqual(lanes[2].platform, "Windows")
-        for lane in lanes {
-            XCTAssertTrue(lane.plistPath.hasSuffix("Library/LaunchAgents/\(lane.agentLabel).plist"))
-        }
+    func testDiscoverFindsRunnerLanesAndExcludesBackups() throws {
+        let tmp = NSTemporaryDirectory() + "la-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        let files = [
+            "com.danielraffel.pulp.tart-runner.plist",                      // gate → macOS · gate
+            "com.danielraffel.pulp.tart-runner-sanitizer-macos.plist",      // macOS · sanitizer
+            "com.danielraffel.pulp.tart-runner-linux.plist",                // Linux
+            "com.danielraffel.pulp.qemu-runner-windows.plist",              // Windows
+            "com.danielraffel.pulp.tart-runner-macos-pilot.plist.disabled", // excluded (not .plist suffix)
+            "com.danielraffel.pulp.tart-runner.plist.pre-phase6",           // excluded (backup)
+            "com.apple.something.plist",                                     // excluded (wrong prefix)
+            "com.danielraffel.pulp.launchd-home-proof.plist",               // excluded (not a runner)
+        ]
+        for f in files { FileManager.default.createFile(atPath: tmp + "/" + f, contents: nil) }
+
+        let lanes = CIServingLane.discover(agentsDirectory: tmp)
+
+        XCTAssertEqual(lanes.count, 4)
+        XCTAssertEqual(lanes.map(\.platform),
+                       ["Linux", "Windows", "macOS · gate", "macOS · sanitizer"])
+        XCTAssertFalse(lanes.contains {
+            $0.id.contains("disabled") || $0.id.contains("pre-phase6")
+                || $0.id.hasPrefix("com.apple") || $0.id.contains("launchd-home-proof")
+        })
+        let gate = try XCTUnwrap(lanes.first { $0.platform == "macOS · gate" })
+        XCTAssertEqual(gate.agentLabel, "com.danielraffel.pulp.tart-runner")
+        XCTAssertEqual(gate.plistPath, tmp + "/com.danielraffel.pulp.tart-runner.plist")
+    }
+
+    func testDiscoverEmptyDirIsEmpty() throws {
+        let tmp = NSTemporaryDirectory() + "la-empty-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+        XCTAssertEqual(CIServingLane.discover(agentsDirectory: tmp).count, 0)
+    }
+
+    func testLaneNameInfersPlatformFromLabel() {
+        let n = CIServingLane.laneName
+        XCTAssertEqual(n("com.danielraffel.pulp.qemu-runner-windows"), "Windows")
+        XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-linux"), "Linux")
+        XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-sanitizer-macos"), "macOS · sanitizer")
+        XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-coverage"), "macOS · coverage")
+        XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-release-cli"), "macOS · release")
+        XCTAssertEqual(n("com.danielraffel.pulp.tart-runner"), "macOS · gate")
+        XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-weird"), "macOS · tart-runner-weird")
     }
 }

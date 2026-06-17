@@ -385,12 +385,22 @@ struct SettingsView: View {
 
     private var serveSection: some View {
         Section("Serve CI builds from this Mac") {
-            let installed = store.servingLanes.filter { store.status(for: $0).installed }
+            // Discovery only returns lanes whose agent plist exists, so a discovered
+            // lane IS installed — use the list directly rather than re-filtering on the
+            // async status dict (which is .unknown on first paint and would briefly
+            // flash the "no runner" empty state on a host that actually has runners).
+            let installed = store.servingLanes
             if installed.isEmpty {
                 Text("No CI runner is set up on this Mac yet. Once this machine is onboarded as a runner, a toggle appears here.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             } else {
+                // Master row first when there's more than one lane, so you can
+                // join/leave the whole pool in one tap without flipping each lane.
+                if installed.count > 1 {
+                    masterServeRow(installed)
+                    Divider()
+                }
                 ForEach(installed) { lane in
                     serveRow(lane)
                 }
@@ -400,6 +410,70 @@ struct SettingsView: View {
             }
         }
         .onAppear { store.refreshServingStatus() }
+    }
+
+    /// Master "serve everything" row — a single switch over all installed lanes.
+    /// ON only when every lane is serving; from a mixed state the switch reads OFF,
+    /// so one tap turns the whole pool on (then a second tap turns it all off).
+    private func masterServeRow(_ lanes: [CIServingLane]) -> some View {
+        let statuses = lanes.map { store.status(for: $0) }
+        let anyToggling = statuses.contains { $0.isToggling }
+        let allServing = !statuses.isEmpty && statuses.allSatisfy { $0.serving }
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("All lanes")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(masterSummary(statuses))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if anyToggling {
+                ProgressView().controlSize(.small)
+            }
+            Toggle("", isOn: Binding(
+                get: { allServing },
+                set: { handleMasterToggle($0, lanes: lanes) }
+            ))
+            .labelsHidden()
+            .disabled(anyToggling)
+        }
+    }
+
+    private func masterSummary(_ statuses: [CIServingStatus]) -> String {
+        if statuses.contains(where: { $0.isToggling }) { return "Updating…" }
+        let serving = statuses.filter { $0.serving }.count
+        if serving == 0 { return "All off" }
+        let building = statuses.reduce(0) { $0 + $1.building }
+        var s = serving == statuses.count
+            ? "All \(statuses.count) serving"
+            : "\(serving) of \(statuses.count) serving"
+        if building > 0 { s += " · building \(building)" }
+        return s
+    }
+
+    private func handleServeToggleAll(_ on: Bool, lanes: [CIServingLane]) {
+        for lane in lanes { store.setServing(on, lane: lane) }
+    }
+
+    private func handleMasterToggle(_ on: Bool, lanes: [CIServingLane]) {
+        guard !on else { handleServeToggleAll(true, lanes: lanes); return }
+        // Turning the whole pool OFF — warn once if any lane has a build actually
+        // running (busy runner), summing across lanes, before cancelling them all.
+        let buildingLanes = lanes.map { store.status(for: $0) }.filter { $0.building > 0 }
+        let n = buildingLanes.reduce(0) { $0 + $1.building }
+        if n > 0 {
+            let alert = NSAlert()
+            alert.messageText = "Builds are running on this Mac"
+            alert.informativeText =
+                "Turning off all CI pool participation now will cancel \(n) in-progress "
+                + "build\(n == 1 ? "" : "s") across \(buildingLanes.count) "
+                + "lane\(buildingLanes.count == 1 ? "" : "s"). Stop anyway?"
+            alert.addButton(withTitle: "Stop All")
+            alert.addButton(withTitle: "Keep Serving")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        handleServeToggleAll(false, lanes: lanes)
     }
 
     private func serveRow(_ lane: CIServingLane) -> some View {
