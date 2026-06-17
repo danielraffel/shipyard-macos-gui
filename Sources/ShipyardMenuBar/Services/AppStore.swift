@@ -1273,6 +1273,26 @@ final class AppStore: ObservableObject {
         servingStatusByLane[lane.id] ?? .unknown
     }
 
+    /// True when this Mac has at least one macOS runner lane — the host-wide
+    /// macOS VM cap only applies to those.
+    var hasMacOSLane: Bool { servingLanes.contains { $0.platform.hasPrefix("macOS") } }
+
+    /// Host-wide cap on concurrent macOS CI VMs (1...2), read from / written to
+    /// `~/.config/tartci/macos-vm-cap`. The tartci runners pick it up live.
+    @Published var macosVMCap: Int = MacOSVMCap.defaultCap
+
+    func refreshMacOSVMCap() { macosVMCap = MacOSVMCap.read() }
+
+    func setMacOSVMCap(_ n: Int) {
+        let clamped = MacOSVMCap.clamp(n)
+        guard clamped != macosVMCap else { return }
+        // Only reflect the new cap in the UI if it actually reached disk — else the
+        // picker would lie about what the runner enforces, and the != guard above
+        // would block a retry. A failed write leaves the picker on the old value.
+        guard MacOSVMCap.write(clamped) else { return }
+        macosVMCap = clamped
+    }
+
     /// Aggregate runner state for the popover header — the *runner* signal,
     /// deliberately separate from `liveStatus` (the connection/data signal).
     var runnerHeaderState: RunnerHeaderState {

@@ -404,12 +404,44 @@ struct SettingsView: View {
                 ForEach(installed) { lane in
                     serveRow(lane)
                 }
+                // Host-wide macOS VM cap (Apple allows 2 guests/Mac). Only relevant
+                // when this Mac actually serves a macOS lane — derive from the list
+                // already fetched above rather than re-scanning the filesystem.
+                if installed.contains(where: { $0.platform.hasPrefix("macOS") }) {
+                    Divider()
+                    macosCapRow
+                }
                 Text("When on, this Mac joins the build pool and runs CI jobs in throwaway VMs. Turn it off while you're working so builds don't run on your machine.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
         }
-        .onAppear { store.refreshServingStatus() }
+        .onAppear { store.refreshServingStatus(); store.refreshMacOSVMCap() }
+    }
+
+    /// Host-wide cap on concurrent macOS VMs (1...2). Writes
+    /// `~/.config/tartci/macos-vm-cap`, which the tartci runners read live.
+    private var macosCapRow: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Max macOS VMs at once")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Apple allows 2 per Mac. Set 1 to keep a slot free while you work.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Picker("", selection: Binding(
+                get: { store.macosVMCap },
+                set: { store.setMacOSVMCap($0) }
+            )) {
+                Text("1").tag(1)
+                Text("2").tag(2)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 76)
+        }
     }
 
     /// Master "serve everything" row — a single switch over all installed lanes.
