@@ -140,7 +140,7 @@ struct SettingsView: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(pollingTint(for: reason))
                     if store.liveStartupPending {
-                        Text("Live mode will connect after the menu has painted so the UI stays responsive.")
+                        Text("Connecting to live updates…")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     } else if let reason {
@@ -399,7 +399,6 @@ struct SettingsView: View {
                 // join/leave the whole pool in one tap without flipping each lane.
                 if installed.count > 1 {
                     masterServeRow(installed)
-                    Divider()
                 }
                 ForEach(installed) { lane in
                     serveRow(lane)
@@ -408,7 +407,6 @@ struct SettingsView: View {
                 // when this Mac actually serves a macOS lane — derive from the list
                 // already fetched above rather than re-scanning the filesystem.
                 if installed.contains(where: { $0.platform.hasPrefix("macOS") }) {
-                    Divider()
                     macosCapRow
                 }
                 Text("When on, this Mac joins the build pool and runs CI jobs in throwaway VMs. Turn it off while you're working so builds don't run on your machine.")
