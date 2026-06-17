@@ -188,10 +188,12 @@ final class CIServingTests: XCTestCase {
         let files = [
             "com.danielraffel.pulp.tart-runner.plist",                      // gate → macOS · gate
             "com.danielraffel.pulp.tart-runner-sanitizer-macos.plist",      // macOS · sanitizer
+            "com.danielraffel.pulp.tart-runner-macos-release.plist",        // macOS · release
             "com.danielraffel.pulp.tart-runner-linux.plist",                // Linux
             "com.danielraffel.pulp.qemu-runner-windows.plist",              // Windows
             "com.danielraffel.pulp.tart-runner-macos-pilot.plist.disabled", // excluded (not .plist suffix)
-            "com.danielraffel.pulp.tart-runner.plist.pre-phase6",           // excluded (backup)
+            "com.danielraffel.pulp.tart-runner.plist.pre-phase6",           // excluded (backup, suffix after .plist)
+            "com.danielraffel.pulp.tart-runner.pre-20260609-phase4.plist",  // excluded (rotated backup: dot-injected, still .plist) — REAL fleet case
             "com.apple.something.plist",                                     // excluded (wrong prefix)
             "com.danielraffel.pulp.launchd-home-proof.plist",               // excluded (not a runner)
         ]
@@ -199,11 +201,12 @@ final class CIServingTests: XCTestCase {
 
         let lanes = CIServingLane.discover(agentsDirectory: tmp)
 
-        XCTAssertEqual(lanes.count, 4)
+        XCTAssertEqual(lanes.count, 5)
         XCTAssertEqual(lanes.map(\.platform),
-                       ["Linux", "Windows", "macOS · gate", "macOS · sanitizer"])
+                       ["Linux", "Windows", "macOS · gate", "macOS · release", "macOS · sanitizer"])
         XCTAssertFalse(lanes.contains {
             $0.id.contains("disabled") || $0.id.contains("pre-phase6")
+                || $0.id.contains("pre-20260609")   // the rotated backup must not appear
                 || $0.id.hasPrefix("com.apple") || $0.id.contains("launchd-home-proof")
         })
         let gate = try XCTUnwrap(lanes.first { $0.platform == "macOS · gate" })

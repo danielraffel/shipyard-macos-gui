@@ -41,8 +41,15 @@ struct CIServingLane: Identifiable, Equatable {
     /// independently, so you can pause any of them while you're working.
     static var known: [CIServingLane] { discover() }
 
+    /// A canonical runner agent label suffix: `tart-runner` or `qemu-runner`,
+    /// optionally followed by hyphenated lane segments (`-linux`, `-macos-release`,
+    /// `-sanitizer-macos`, …) — lowercase alphanumerics and hyphens only, NO dots.
+    /// This is what excludes rotated backups that still end in `.plist` but inject a
+    /// dot, e.g. `com.danielraffel.pulp.tart-runner.pre-20260609-phase4.plist`.
+    static let runnerLabelSuffixPattern = "^(tart|qemu)-runner(-[a-z0-9]+)*$"
+
     /// Discover installed runner lanes by scanning `~/Library/LaunchAgents` for
-    /// `com.danielraffel.pulp.*{tart,qemu}-runner*.plist`. Sorted for stable order.
+    /// `com.danielraffel.pulp.<canonical-runner-label>.plist`. Sorted for stable order.
     static func discover(
         agentsDirectory: String = (NSHomeDirectory() as NSString)
             .appendingPathComponent("Library/LaunchAgents"),
@@ -50,11 +57,16 @@ struct CIServingLane: Identifiable, Equatable {
     ) -> [CIServingLane] {
         guard let files = try? fileManager.contentsOfDirectory(atPath: agentsDirectory)
         else { return [] }
+        let prefix = "com.danielraffel.pulp."
         return files
             .filter { filename in
-                guard filename.hasPrefix("com.danielraffel.pulp.") && filename.hasSuffix(".plist")
-                    && (filename.contains("tart-runner") || filename.contains("qemu-runner"))
-                else { return false }
+                guard filename.hasPrefix(prefix) && filename.hasSuffix(".plist") else { return false }
+                // The label between the prefix and `.plist` must be a CANONICAL runner
+                // label — not a backup/rotated/disabled variant that happens to keep
+                // the `.plist` extension (the real fleet has exactly such a backup).
+                let suffix = String(filename.dropFirst(prefix.count).dropLast(".plist".count))
+                guard suffix.range(of: runnerLabelSuffixPattern,
+                                   options: [.regularExpression]) != nil else { return false }
                 // Exclude a directory that merely happens to be named *.plist — it
                 // would otherwise become a phantom "installed" lane with no labels.
                 var isDir: ObjCBool = false
