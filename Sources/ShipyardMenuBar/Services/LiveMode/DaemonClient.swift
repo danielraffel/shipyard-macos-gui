@@ -165,7 +165,20 @@ final class DaemonClient {
                 Task { @MainActor in self?.handleDisconnect(reason: reason) }
             }
             activeSession = session
-            await session.start()
+            // Bound the connect: if the daemon is wedged (e.g. stuck registering a
+            // webhook) `start()` can block on the socket indefinitely, pinning the
+            // UI on "starting live". Time out → fall back to polling with a reason
+            // and tear down so the next reconcile (Tailscale watcher, ~60s) retries
+            // cleanly once the daemon-health watchdog has healed it.
+            let connected = await withDaemonConnectTimeout(seconds: 15) {
+                await session.start()
+            }
+            guard connected else {
+                await tearDown()
+                update(status: .polling(reason: .daemonUnavailable(
+                    "live daemon didn't respond in time — retrying shortly")))
+                return
+            }
             if cachedStatus?.tunnelURL == nil, let url = tailscale.funnelURL {
                 update(status: .live(tunnelURL: url, lastEventAt: lastEventAt))
             }
@@ -1052,4 +1065,24 @@ struct DaemonStatus: Equatable {
     let subscribers: Int
     let registeredRepos: [String]
     let lastError: String?
+}
+
+/// Run `operation`, returning true if it finished within `seconds`, false if it
+/// timed out. On timeout the operation's task is cancelled and abandoned (the
+/// caller moves on) so a blocked daemon connect can't pin the UI. Used to bound
+/// `Session.start()`.
+func withDaemonConnectTimeout(
+    seconds: Double,
+    _ operation: @escaping @Sendable () async -> Void
+) async -> Bool {
+    await withTaskGroup(of: Bool.self) { group in
+        group.addTask { await operation(); return true }
+        group.addTask {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            return false
+        }
+        let finishedFirst = await group.next() ?? false
+        group.cancelAll()
+        return finishedFirst
+    }
 }
