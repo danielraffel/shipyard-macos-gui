@@ -52,11 +52,7 @@ enum GitHubRateLimitPoller {
     }
 
     private static func resolveGH() -> String? {
-        ShipyardProcessEnvironment.findExecutable(named: "gh", candidates: [
-            "/opt/homebrew/bin/gh",
-            "/usr/local/bin/gh",
-            "/usr/bin/gh",
-        ])
+        ShipyardProcessEnvironment.resolveGitHubCLI()
     }
 
     private static func runCapturing(
