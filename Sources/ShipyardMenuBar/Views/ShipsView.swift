@@ -11,13 +11,18 @@ struct ShipsView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
                 rateLimitBanner
-                if store.ships.isEmpty {
+                if store.ships.isEmpty && !showFleetView {
                     emptyState
                 } else {
                     ActivitySummaryStrip()
                     NamespaceActivitySection()
                     headerBar
-                    trackedPRGroupsView
+                    machineFilterBar
+                    if showFleetView {
+                        fleetPRsView
+                    } else {
+                        trackedPRGroupsView
+                    }
                     GitHubActionsSection()
                     scopeFooter
                 }
@@ -143,6 +148,113 @@ struct ShipsView: View {
         return ForEach(sortedRepos, id: \.self) { repo in
             repoGroup(repo: repo, ships: groups[repo] ?? [])
         }
+    }
+
+    // MARK: - Fleet PR filter (This Mac / All / per-machine)
+
+    /// Machine selector — only shown when remote fleet hosts are configured
+    /// (~/.config/shipyard/fleet-hosts.json). "This Mac" keeps the rich local
+    /// cards; All / a machine shows that Mac's tracked PRs (read-only, no GitHub
+    /// calls). Switching to a remote view kicks a quota-free SSH ship-state pull.
+    @ViewBuilder
+    private var machineFilterBar: some View {
+        let names = store.fleetMachineNames
+        if !names.isEmpty {
+            HStack(spacing: 6) {
+                Image(systemName: "desktopcomputer")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                Picker("", selection: $store.prMachineFilter) {
+                    Text(AppStore.thisMacFilter).tag(AppStore.thisMacFilter)
+                    Text(AppStore.allMacsFilter).tag(AppStore.allMacsFilter)
+                    ForEach(names, id: \.self) { Text($0).tag($0) }
+                }
+                .pickerStyle(.menu).labelsHidden().fixedSize()
+                Spacer()
+                if store.prMachineFilter != AppStore.thisMacFilter {
+                    let n = fleetPRsForFilter.count
+                    Text("\(n) PR\(n == 1 ? "" : "s") · no API calls")
+                        .font(.system(size: 9)).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 4)
+            .help("See PRs tracked by other Macs in the pool. Read from each Mac's local Shipyard over Tailscale — never the GitHub API, so it costs no rate-limit budget.")
+            .onAppear { if store.prMachineFilter != AppStore.thisMacFilter { store.refreshFleetPRs() } }
+        }
+    }
+
+    /// Local ships presented in the uniform fleet shape so "All" can list this
+    /// Mac alongside the remotes.
+    private var localShipsAsFleetPRs: [FleetPR] {
+        visibleShips.map {
+            FleetPR(machine: AppStore.thisMacFilter, repo: $0.repo, prNumber: $0.prNumber,
+                    title: $0.prTitle, branch: $0.branch, prURL: nil)
+        }
+    }
+
+    /// Show the fleet view only when remote hosts exist AND a non-local filter is
+    /// chosen. Guards the stuck state where a persisted remote filter + a removed
+    /// hosts config would otherwise hide the local cards with no way back.
+    private var showFleetView: Bool {
+        !store.fleetMachineNames.isEmpty && store.prMachineFilter != AppStore.thisMacFilter
+    }
+
+    private var fleetPRsForFilter: [FleetPR] {
+        switch store.prMachineFilter {
+        case AppStore.thisMacFilter: return []
+        case AppStore.allMacsFilter: return localShipsAsFleetPRs + store.fleetPRs
+        case let machine: return store.fleetPRs.filter { $0.machine == machine }
+        }
+    }
+
+    @ViewBuilder
+    private var fleetPRsView: some View {
+        let prs = fleetPRsForFilter
+        if prs.isEmpty {
+            Text(store.fleetPRs.isEmpty
+                 ? "Fetching over Tailscale… (or that Mac is offline / has no tracked PRs)."
+                 : "No tracked PRs for this selection.")
+                .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 4)
+        } else {
+            let byMachine = Dictionary(grouping: prs, by: \.machine)
+            ForEach(byMachine.keys.sorted(), id: \.self) { machine in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "desktopcomputer")
+                            .font(.system(size: 9)).foregroundStyle(.tertiary)
+                        Text(machine).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(byMachine[machine]?.count ?? 0)")
+                            .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 4).padding(.top, 4)
+                    ForEach((byMachine[machine] ?? []).sorted {
+                        ($0.repo, $0.prNumber) < ($1.repo, $1.prNumber)
+                    }) { pr in
+                        fleetPRRow(pr)
+                    }
+                }
+            }
+        }
+    }
+
+    private func fleetPRRow(_ pr: FleetPR) -> some View {
+        HStack(spacing: 6) {
+            Text(pr.repo)
+                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
+                .lineLimit(1).truncationMode(.middle).layoutPriority(0)
+            Text("#\(pr.prNumber)")
+                .font(.system(size: 11, weight: .medium)).foregroundStyle(.blue)
+            Text(pr.title.isEmpty ? pr.branch : pr.title)
+                .font(.system(size: 11)).lineLimit(1).truncationMode(.tail).layoutPriority(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let u = pr.prURL, let url = URL(string: u) { NSWorkspace.shared.open(url) }
+        }
+        .help(pr.prURL ?? "\(pr.repo) #\(pr.prNumber)")
     }
 
     private func repoGroup(repo: String, ships: [Ship]) -> some View {

@@ -193,6 +193,43 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(ghGrouping.rawValue, forKey: Keys.ghGrouping) }
     }
 
+    // MARK: - Fleet PR filter (see other Macs' tracked PRs, quota-free)
+
+    /// Sentinel filter value for "this Mac" (the local ship-state).
+    static let thisMacFilter = "This Mac"
+    static let allMacsFilter = "All"
+
+    /// Tracked-PR machine filter: "This Mac" (default), "All", or a fleet host
+    /// name. Persisted. Only the non-local values trigger SSH ship-state pulls.
+    @Published var prMachineFilter: String =
+        UserDefaults.standard.string(forKey: Keys.prMachineFilter) ?? thisMacFilter {
+        didSet {
+            UserDefaults.standard.set(prMachineFilter, forKey: Keys.prMachineFilter)
+            if prMachineFilter != Self.thisMacFilter { refreshFleetPRs() }
+        }
+    }
+
+    /// PRs tracked by *remote* fleet Macs (read-only, GitHub-quota-free).
+    @Published private(set) var fleetPRs: [FleetPR] = []
+    private var fleetRefreshTask: Task<Void, Never>?
+
+    /// Configured remote Macs (for the filter menu); "This Mac" + "All" are added
+    /// by the view.
+    var fleetMachineNames: [String] { FleetShipState.hosts().map(\.name) }
+
+    /// Pull remote ship-state over SSH (lazy — only meaningful when the filter is
+    /// not "This Mac"). Off-main, cancellable, fail-graceful.
+    func refreshFleetPRs() {
+        let hosts = FleetShipState.hosts()
+        guard !hosts.isEmpty else { return }
+        fleetRefreshTask?.cancel()
+        fleetRefreshTask = Task { [weak self] in
+            let prs = await FleetShipState.fetch(hosts: hosts)
+            if Task.isCancelled { return }
+            await MainActor.run { self?.fleetPRs = prs }
+        }
+    }
+
     /// Bumped when the user clicks "expand all" or "collapse all" in
     /// the header. Ship cards listen and update their local expanded
     /// state.
@@ -2026,6 +2063,7 @@ final class AppStore: ObservableObject {
         static let ghWorkflowBlocklist = "ghWorkflowBlocklist"
         static let otherActionsExpanded = "otherActionsExpanded"
         static let ghGrouping = "ghGrouping"
+        static let prMachineFilter = "prMachineFilter"
         static let liveUpdateMode = "liveUpdateMode"
         static let autoExpandActivePRs = "autoExpandActivePRs"
         static let launchAtLogin = "launchAtLogin"

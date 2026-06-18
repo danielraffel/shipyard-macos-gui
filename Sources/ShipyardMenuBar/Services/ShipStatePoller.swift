@@ -33,6 +33,19 @@ private struct ShipStateListEnvelope: Decodable {
     let states: [ShipStateListEntry]
 }
 
+extension ShipStateListEntry {
+    /// Decode `shipyard --json ship-state list` output (envelope or bare array)
+    /// into entries. Shared by the local poller and the fleet (remote) fetch so
+    /// both tolerate the same CLI shapes.
+    static func decode(fromJSON raw: String) -> [ShipStateListEntry]? {
+        guard let data = raw.data(using: .utf8) else { return nil }
+        if let env = try? JSONDecoder.shipyard.decode(ShipStateListEnvelope.self, from: data) {
+            return env.states
+        }
+        return try? JSONDecoder.shipyard.decode([ShipStateListEntry].self, from: data)
+    }
+}
+
 enum ShipStateListPoller {
     /// Fetch the ship-state list, preferring the daemon IPC socket
     /// when it's available. Falls back to the CLI subprocess path.
