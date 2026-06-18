@@ -68,6 +68,28 @@ struct GitHubJob: Decodable, Equatable, Hashable {
         (labels ?? []).last ?? runnerName ?? "?"
     }
 
+    /// Best-effort friendly name of the physical machine this job ran on, for
+    /// the "by machine" grouping. Host tags (`pulp-host-m5` / `pulp-host-m1`) and
+    /// the Studio runner names are reliable; macOS ephemeral VMs register a
+    /// JIT runner with no host tag, so those fall back to "Ephemeral VM" (or the
+    /// hosted/Namespace bucket). Stable, side-effect-free — see GitHubRunTests.
+    var machine: String {
+        let r = (runnerName ?? "").lowercased()
+        let l = (labels ?? []).map { $0.lowercased() }
+        func has(_ s: String) -> Bool { r.contains(s) || l.contains { $0.contains(s) } }
+        if has("pulp-host-m5") || has("blackbook") || has("-m5") { return "M5" }
+        if has("pulp-host-m1") || has("macbook") || has("-m1") { return "M1" }
+        if has("studio") { return "Mac Studio" }
+        switch provider {
+        case "github-hosted": return "GitHub-hosted"
+        case "namespace": return "Namespace"
+        default: break
+        }
+        if r.contains("ephr") || l.contains("pulp-build-vm") { return "Ephemeral VM" }
+        if let rn = runnerName, !rn.isEmpty { return rn }
+        return "Unknown"
+    }
+
     var namespaceInstanceID: String? {
         guard let runnerName else { return nil }
         let prefix = "nsc-runner-"

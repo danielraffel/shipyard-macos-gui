@@ -81,7 +81,15 @@ enum DaemonRuntimePathResolver {
             status = process.terminationStatus
             group.leave()
         }
-        guard group.wait(timeout: .now() + 1.5) == .success else {
+        // 5s, not 1.5s: spawning `shipyard --json paths` can take >1.5s when the
+        // machine is busy at GUI launch, which would spuriously fall back to the
+        // legacy paths (and flaked this test under load). Resolution is cached, and
+        // is normally warmed off-main by ShipStatePoller before Session.init reads
+        // it. Caveat: the rare first-launch race where Session.init (@MainActor)
+        // hits the uncached path can now block the main thread for up to 5s — a
+        // pre-existing synchronous pattern this widens. TODO: resolve off-main in
+        // Session.init (tracked in backlog).
+        guard group.wait(timeout: .now() + 5) == .success else {
             if process.isRunning {
                 process.terminate()
             }

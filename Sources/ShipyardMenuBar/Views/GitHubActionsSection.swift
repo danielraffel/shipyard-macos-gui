@@ -8,18 +8,34 @@ struct GitHubActionsSection: View {
     @EnvironmentObject var store: AppStore
 
     var body: some View {
-        let groups = store.unrelatedGitHubRuns()
-        if store.showGitHubActions && !groups.isEmpty {
+        // Tallies in the header are grouping-independent, so key them off the
+        // repo grouping; the body renders whatever grouping the user picked.
+        let byRepo = store.unrelatedGitHubRuns()
+        if store.showGitHubActions && !byRepo.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                collapsibleHeader(groups: groups)
+                collapsibleHeader(groups: byRepo)
                 if store.otherActionsExpanded {
-                    ForEach(groups.keys.sorted(), id: \.self) { repo in
-                        repoGroup(repo: repo, runs: groups[repo] ?? [])
+                    groupingPicker
+                    ForEach(store.groupedGitHubRuns(), id: \.key) { group in
+                        repoGroup(repo: group.key, runs: group.runs)
                     }
                 }
             }
             .padding(.top, 12)
         }
+    }
+
+    /// All / by-machine / by-runner selector for the runs below.
+    private var groupingPicker: some View {
+        Picker("", selection: $store.ghGrouping) {
+            ForEach(AppStore.GHGrouping.allCases) { g in
+                Text(g.label).tag(g)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.bottom, 2)
+        .help("Group runs by repository (All), by the Mac that ran them, or by the specific runner.")
     }
 
     private func collapsibleHeader(groups: [String: [GitHubRun]]) -> some View {

@@ -174,6 +174,25 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(otherActionsExpanded, forKey: Keys.otherActionsExpanded) }
     }
 
+    /// How the GitHub Actions runs are grouped: by repo (All), by machine, or by
+    /// runner. Persisted so the choice sticks across launches.
+    enum GHGrouping: String, CaseIterable, Identifiable {
+        case repo, machine, runner
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .repo: return "All"
+            case .machine: return "Machine"
+            case .runner: return "Runner"
+            }
+        }
+    }
+
+    @Published var ghGrouping: GHGrouping =
+        GHGrouping(rawValue: UserDefaults.standard.string(forKey: Keys.ghGrouping) ?? "") ?? .repo {
+        didSet { UserDefaults.standard.set(ghGrouping.rawValue, forKey: Keys.ghGrouping) }
+    }
+
     /// Bumped when the user clicks "expand all" or "collapse all" in
     /// the header. Ship cards listen and update their local expanded
     /// state.
@@ -1885,6 +1904,43 @@ final class AppStore: ObservableObject {
     /// workflows (post-tag-sync), direct pushes to main, or runs for
     /// PRs we don't have local ship-state for. Shown in the "GitHub
     /// Actions" section below the ship cards.
+    // MARK: - GitHub Actions grouping (All / by machine / by runner)
+
+    /// Machines a run touched, derived from its cached jobs' runners. A run can
+    /// span machines (e.g. macOS on a Mac, Linux on GitHub-hosted), so it can
+    /// appear under several. Empty (jobs not fetched yet) → ["Unknown"].
+    func machines(for run: GitHubRun) -> [String] {
+        let names = Set((jobsByRunId[run.id] ?? []).map(\.machine))
+        return names.isEmpty ? ["Unknown"] : names.sorted()
+    }
+
+    /// Specific runner names a run touched (falls back to the last label).
+    func runners(for run: GitHubRun) -> [String] {
+        let names = Set((jobsByRunId[run.id] ?? []).compactMap { $0.runnerName ?? $0.labels?.last })
+        return names.isEmpty ? ["Unknown"] : names.sorted()
+    }
+
+    /// Re-group the unrelated GitHub runs by the selected mode. `.repo` is the
+    /// existing repo grouping; `.machine`/`.runner` bucket by the run's jobs
+    /// (a multi-machine run appears under each). Returned sorted by key.
+    func groupedGitHubRuns() -> [(key: String, runs: [GitHubRun])] {
+        let byRepo = unrelatedGitHubRuns()
+        if ghGrouping == .repo {
+            return byRepo.keys.sorted().map { ($0, byRepo[$0] ?? []) }
+        }
+        var buckets: [String: [GitHubRun]] = [:]
+        for run in byRepo.values.flatMap({ $0 }) {
+            let keys = ghGrouping == .machine ? machines(for: run) : runners(for: run)
+            for k in keys { buckets[k, default: []].append(run) }
+        }
+        // Stable, readable order: "Unknown" sinks to the bottom.
+        let keys = buckets.keys.sorted { a, b in
+            if (a == "Unknown") != (b == "Unknown") { return b == "Unknown" }
+            return a < b
+        }
+        return keys.map { ($0, buckets[$0] ?? []) }
+    }
+
     func unrelatedGitHubRuns() -> [String: [GitHubRun]] {
         let blocked = currentBlocklist()
         let cutoff = currentCutoff()
@@ -1969,6 +2025,7 @@ final class AppStore: ObservableObject {
         static let ghWindowMinutes = "ghWindowMinutes"
         static let ghWorkflowBlocklist = "ghWorkflowBlocklist"
         static let otherActionsExpanded = "otherActionsExpanded"
+        static let ghGrouping = "ghGrouping"
         static let liveUpdateMode = "liveUpdateMode"
         static let autoExpandActivePRs = "autoExpandActivePRs"
         static let launchAtLogin = "launchAtLogin"
