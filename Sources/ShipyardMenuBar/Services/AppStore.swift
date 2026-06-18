@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import ServiceManagement
+import AppKit
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -207,6 +208,22 @@ final class AppStore: ObservableObject {
             UserDefaults.standard.set(prMachineFilter, forKey: Keys.prMachineFilter)
             if prMachineFilter != Self.thisMacFilter { refreshFleetPRs() }
         }
+    }
+
+    /// When on (default), opening a link from the popover dismisses the popover.
+    @Published var closeOnLinkOpen: Bool =
+        UserDefaults.standard.object(forKey: Keys.closeOnLinkOpen) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(closeOnLinkOpen, forKey: Keys.closeOnLinkOpen) }
+    }
+
+    /// Set by StatusItemController so the store can dismiss the popover.
+    var popoverCloser: (() -> Void)?
+
+    /// Open a URL, then dismiss the popover when `closeOnLinkOpen` is set. Route
+    /// all popover link-opens through here (incl. via the openURL environment).
+    func openLink(_ url: URL) {
+        NSWorkspace.shared.open(url)
+        if closeOnLinkOpen { popoverCloser?() }
     }
 
     /// PRs tracked by *remote* fleet Macs (read-only, GitHub-quota-free).
@@ -2064,6 +2081,7 @@ final class AppStore: ObservableObject {
         static let otherActionsExpanded = "otherActionsExpanded"
         static let ghGrouping = "ghGrouping"
         static let prMachineFilter = "prMachineFilter"
+        static let closeOnLinkOpen = "closeOnLinkOpen"
         static let liveUpdateMode = "liveUpdateMode"
         static let autoExpandActivePRs = "autoExpandActivePRs"
         static let launchAtLogin = "launchAtLogin"

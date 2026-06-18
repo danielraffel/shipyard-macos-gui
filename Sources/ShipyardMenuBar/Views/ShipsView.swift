@@ -6,6 +6,8 @@ struct ShipsView: View {
     /// ProgressView feedback while the pipeline re-polls. Reset when
     /// ships actually appear (see .onChange below).
     @State private var isRestoring: Bool = false
+    /// Expanded fleet PR rows (by FleetPR.id) — shows that Mac's last-known lanes.
+    @State private var expandedFleetPRs: Set<String> = []
 
     var body: some View {
         ScrollView {
@@ -184,8 +186,19 @@ struct ShipsView: View {
 
     /// Local ships presented in the uniform fleet shape so "All" can list this
     /// Mac alongside the remotes.
+    private func fleetStatus(_ t: TargetStatus) -> FleetPR.Status {
+        switch t {
+        case .failed: return .failed
+        case .passed, .reused, .skipped: return .passed
+        default: return .pending
+        }
+    }
+
     private var localShipsAsFleetPRs: [FleetPR] {
         visibleShips.map { ship in
+            let lanes = ship.targets.map {
+                FleetPR.Lane(target: $0.name, result: fleetStatus($0.status), phase: nil)
+            }
             let status: FleetPR.Status
             switch ship.overallStatus {
             case .failed: status = .failed
@@ -194,7 +207,7 @@ struct ShipsView: View {
             }
             return FleetPR(machine: AppStore.thisMacFilter, repo: ship.repo,
                            prNumber: ship.prNumber, title: ship.prTitle,
-                           branch: ship.branch, prURL: nil, status: status)
+                           branch: ship.branch, prURL: nil, status: status, lanes: lanes)
         }
     }
 
@@ -261,27 +274,59 @@ struct ShipsView: View {
     }
 
     private func fleetPRRow(_ pr: FleetPR) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            // Last-known CI status (from the remote Mac's ship-state, no API call).
-            Circle().fill(fleetStatusColor(pr.status))
-                .frame(width: 6, height: 6).padding(.top, 4)
-            // Fixed-width PR number so it never wraps or gets squeezed.
-            Text("#\(pr.prNumber)")
-                .font(.system(size: 11, weight: .medium)).foregroundStyle(.blue)
-                .lineLimit(1).fixedSize()
-            VStack(alignment: .leading, spacing: 2) {
-                Text(pr.title.isEmpty ? pr.branch : pr.title)
-                    .font(.system(size: 11))
-                    .lineLimit(1).truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(pr.repo)
-                    .font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
-                    .lineLimit(1).truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        let isExpanded = expandedFleetPRs.contains(pr.id)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 7) {
+                // Chevron expands to the last-known lanes (no API call). Disabled
+                // when the remote ship-state recorded no lanes for this PR.
+                Button {
+                    if isExpanded { expandedFleetPRs.remove(pr.id) }
+                    else { expandedFleetPRs.insert(pr.id) }
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(pr.lanes.isEmpty ? .quaternary : .secondary)
+                        .frame(width: 12, alignment: .center).padding(.top, 2)
+                }
+                .buttonStyle(.plain).disabled(pr.lanes.isEmpty)
+                Circle().fill(fleetStatusColor(pr.status))
+                    .frame(width: 6, height: 6).padding(.top, 4)
+                Text("#\(pr.prNumber)")
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.blue)
+                    .lineLimit(1).fixedSize()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pr.title.isEmpty ? pr.branch : pr.title)
+                        .font(.system(size: 11))
+                        .lineLimit(1).truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(pr.repo)
+                        .font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if pr.prURL != nil {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary).padding(.top, 1)
+                }
             }
-            if pr.prURL != nil {
-                Image(systemName: "arrow.up.right.square")
-                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+            if isExpanded && !pr.lanes.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(pr.lanes) { lane in
+                        HStack(spacing: 6) {
+                            Circle().fill(fleetStatusColor(lane.result)).frame(width: 5, height: 5)
+                            Text(lane.target).font(.system(size: 10, weight: .medium))
+                            if let ph = lane.phase, !ph.isEmpty {
+                                Text(ph).font(.system(size: 9)).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 4)
+                            Text(fleetStatusLabel(lane.result))
+                                .font(.system(size: 9)).foregroundStyle(fleetStatusColor(lane.result))
+                        }
+                    }
+                    Text("last-known from \(pr.machine)'s ship-state · no API call")
+                        .font(.system(size: 8)).foregroundStyle(.quaternary).padding(.top, 1)
+                }
+                .padding(.leading, 25).padding(.top, 7)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
@@ -291,10 +336,12 @@ struct ShipsView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary, lineWidth: 0.5))
         )
         .contentShape(Rectangle())
+        // Tap the row body to open the PR (chevron handles expand). Honors the
+        // "close on link open" setting via store.openLink.
         .onTapGesture {
-            if let u = pr.prURL, let url = URL(string: u) { NSWorkspace.shared.open(url) }
+            if let u = pr.prURL, let url = URL(string: u) { store.openLink(url) }
         }
-        .help("\(pr.repo) #\(pr.prNumber) · \(fleetStatusLabel(pr.status))\n\(pr.title.isEmpty ? pr.branch : pr.title)\nbranch: \(pr.branch)\(pr.prURL != nil ? "\nclick to open on GitHub" : "")")
+        .help("\(pr.repo) #\(pr.prNumber) · \(fleetStatusLabel(pr.status))\n\(pr.title.isEmpty ? pr.branch : pr.title)\nbranch: \(pr.branch)\(pr.lanes.isEmpty ? "" : "\nexpand ▸ for last-known lanes")\(pr.prURL != nil ? "\nclick to open on GitHub" : "")")
     }
 
     private func repoGroup(repo: String, ships: [Ship]) -> some View {

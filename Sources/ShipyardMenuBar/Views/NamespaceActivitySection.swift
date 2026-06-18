@@ -149,7 +149,7 @@ private struct NamespaceInstanceRow: View {
                     )
                     if let namespaceURL = jobContext?.namespaceURL {
                         Button {
-                            NSWorkspace.shared.open(namespaceURL)
+                            store.openLink(namespaceURL)
                         } label: {
                             Image(systemName: "arrow.up.forward.square")
                                 .font(.system(size: 9, weight: .medium))
@@ -330,7 +330,7 @@ private struct NamespaceInstanceRow: View {
 
     private func linkButton(_ label: String, url: URL) -> some View {
         Button(label) {
-            NSWorkspace.shared.open(url)
+            store.openLink(url)
         }
         .buttonStyle(.plain)
         .font(.system(size: 9, weight: .medium))

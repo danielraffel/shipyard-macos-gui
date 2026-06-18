@@ -43,6 +43,13 @@ struct PopoverView: View {
             ClipboardToastView()
                 .padding(.bottom, 14)
         }
+        // Route every link-open in the popover (SwiftUI Links + buttons that use
+        // the openURL environment) through the store so the "close on link open"
+        // preference is honored uniformly.
+        .environment(\.openURL, OpenURLAction { url in
+            store.openLink(url)
+            return .handled
+        })
         // The runner indicator lives in the always-visible header, so refresh
         // serving status when the popover opens (not only on the Settings tab).
         .onAppear { store.refreshServingStatus() }

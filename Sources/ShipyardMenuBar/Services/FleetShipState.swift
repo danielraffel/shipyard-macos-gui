@@ -14,8 +14,18 @@ struct FleetPR: Identifiable, Equatable {
     /// Last-recorded CI status from the remote Mac's ship-state evidence
     /// (no GitHub call). May be stale, but reflects what that Mac knows.
     let status: Status
+    /// Per-target last-known results from that Mac's ship-state — shown when the
+    /// row is expanded. Quota-free (ship-state, not GitHub).
+    let lanes: [Lane]
 
     enum Status: Equatable { case passed, failed, pending }
+
+    struct Lane: Identifiable, Equatable {
+        let target: String       // e.g. "mac", "linux", "windows"
+        let result: Status
+        let phase: String?       // e.g. "test", "build" (last phase seen)
+        var id: String { target }
+    }
 
     // Stable across refreshes: a PR is identified by machine + repo + number.
     var id: String { "\(machine)\t\(repo)\t\(prNumber)" }
@@ -87,6 +97,7 @@ enum FleetShipState {
     static func map(_ entries: [ShipStateListEntry], machine: String) -> [FleetPR] {
         entries.compactMap { e in
             guard let repo = e.repo, !repo.isEmpty else { return nil }
+            let lanes = self.lanes(evidence: e.evidenceSnapshot, runs: e.dispatchedRuns)
             return FleetPR(
                 machine: machine,
                 repo: repo,
@@ -94,18 +105,49 @@ enum FleetShipState {
                 title: e.prTitle ?? e.commitSubject ?? "",
                 branch: e.branch ?? "",
                 prURL: e.prUrl,
-                status: status(from: e.evidenceSnapshot)
+                status: overall(of: lanes),
+                lanes: lanes
             )
         }
     }
 
-    /// Derive a coarse CI status from a ship-state evidence snapshot — a
-    /// `{target: "pass"|"fail"}` map. Any fail ⇒ failed; some pass and no fail ⇒
-    /// passed; nothing recorded ⇒ pending (awaiting / not dispatched).
-    static func status(from evidence: [String: String]?) -> FleetPR.Status {
-        let values = (evidence ?? [:]).values.map { $0.lowercased() }
-        if values.contains("fail") { return .failed }
-        if values.contains("pass") { return .passed }
+    /// Per-target last-known lanes from the ship-state. The evidence snapshot
+    /// (`{target: "pass"|"fail"}`) is authoritative for pass/fail; dispatched_runs
+    /// add the phase and any targets without evidence yet. All from ship-state —
+    /// no GitHub call.
+    static func lanes(evidence: [String: String]?,
+                      runs: [WatchEvent.DispatchedRun]?) -> [FleetPR.Lane] {
+        let ev = evidence ?? [:]
+        var byTarget: [String: FleetPR.Lane] = [:]
+        func result(target: String, runStatus: String?) -> FleetPR.Status {
+            switch ev[target]?.lowercased() {
+            case "fail": return .failed
+            case "pass": return .passed
+            default: break
+            }
+            switch runStatus?.lowercased() {
+            case "failed": return .failed
+            case "completed": return .passed   // completed + no fail evidence ⇒ best-effort pass
+            default: return .pending            // cancelled / running / queued / none
+            }
+        }
+        for r in runs ?? [] {
+            byTarget[r.target] = FleetPR.Lane(target: r.target,
+                                              result: result(target: r.target, runStatus: r.status),
+                                              phase: r.phase)
+        }
+        for target in ev.keys where byTarget[target] == nil {
+            byTarget[target] = FleetPR.Lane(target: target,
+                                            result: result(target: target, runStatus: nil),
+                                            phase: nil)
+        }
+        return byTarget.values.sorted { $0.target < $1.target }
+    }
+
+    /// Overall PR status = worst lane (any fail ⇒ failed, else any pass ⇒ passed).
+    static func overall(of lanes: [FleetPR.Lane]) -> FleetPR.Status {
+        if lanes.contains(where: { $0.result == .failed }) { return .failed }
+        if lanes.contains(where: { $0.result == .passed }) { return .passed }
         return .pending
     }
 

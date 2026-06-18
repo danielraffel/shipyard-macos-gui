@@ -15,11 +15,21 @@ struct SettingsView: View {
             notificationsSection
             autoClearSection
             displaySection
+            behaviorSection
             #if DEBUG
             developerSection
             #endif
         }
         .formStyle(.grouped)
+    }
+
+    private var behaviorSection: some View {
+        Section("Behavior") {
+            Toggle("Close window when opening a link", isOn: $store.closeOnLinkOpen)
+            Text("When on, clicking a PR or run link opens it in your browser and dismisses this window. Turn off to keep the window open.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var generalSection: some View {

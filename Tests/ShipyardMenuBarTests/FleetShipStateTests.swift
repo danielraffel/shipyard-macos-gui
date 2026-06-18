@@ -53,6 +53,30 @@ final class FleetShipStateTests: XCTestCase {
         XCTAssertEqual(prs[0].id, "M3\tdanielraffel/pulp\t4172")
     }
 
+    func testLanesAndOverallFromEvidenceAndRuns() {
+        let json = """
+        {"states":[{"pr":1,"repo":"a/b","pr_title":"t",
+          "evidence_snapshot":{"mac":"fail","linux":"pass"},
+          "dispatched_runs":[
+            {"target":"mac","provider":"local","run_id":"r1","status":"failed","started_at":"2026-06-01T00:00:00Z","updated_at":"2026-06-01T00:00:00Z","phase":"test"},
+            {"target":"linux","provider":"local","run_id":"r2","status":"completed","started_at":"2026-06-01T00:00:00Z","updated_at":"2026-06-01T00:00:00Z","phase":"build"},
+            {"target":"windows","provider":"local","run_id":"r3","status":"running","started_at":"2026-06-01T00:00:00Z","updated_at":"2026-06-01T00:00:00Z","phase":null}
+          ]}]}
+        """
+        let entries = ShipStateListEntry.decode(fromJSON: json) ?? []
+        let prs = FleetShipState.map(entries, machine: "M3")
+        XCTAssertEqual(prs.count, 1)
+        let pr = prs[0]
+        // overall = worst lane (mac failed) → failed
+        XCTAssertEqual(pr.status, .failed)
+        // lanes sorted by target: linux(pass), mac(fail), windows(pending/running)
+        XCTAssertEqual(pr.lanes.map(\.target), ["linux", "mac", "windows"])
+        XCTAssertEqual(pr.lanes.first { $0.target == "mac" }?.result, .failed)
+        XCTAssertEqual(pr.lanes.first { $0.target == "linux" }?.result, .passed)
+        XCTAssertEqual(pr.lanes.first { $0.target == "windows" }?.result, .pending)
+        XCTAssertEqual(pr.lanes.first { $0.target == "mac" }?.phase, "test")
+    }
+
     func testDecodeBareArrayShape() {
         let arr = """
         [{"pr":1,"repo":"a/b","pr_title":"t"}]

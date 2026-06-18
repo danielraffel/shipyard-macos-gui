@@ -31,7 +31,7 @@ struct GitHubRunRow: View {
             // the run on github.com — much bigger tap target than the
             // tiny arrow icon.
             Button {
-                if let url = run.url { NSWorkspace.shared.open(url) }
+                if let url = run.url { store.openLink(url) }
             } label: {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 1) {

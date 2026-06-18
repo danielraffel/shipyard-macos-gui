@@ -49,6 +49,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             rootView: PopoverView().environmentObject(store)
                 .frame(width: 420, height: 560)
         )
+
+        // Let the store dismiss the popover (e.g. auto-close after opening a link).
+        store.popoverCloser = { [weak self] in
+            guard let self, self.popover.isShown else { return }
+            self.popover.performClose(nil)
+        }
     }
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {
