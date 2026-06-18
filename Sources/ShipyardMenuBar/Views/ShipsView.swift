@@ -238,15 +238,25 @@ struct ShipsView: View {
     }
 
     private func fleetPRRow(_ pr: FleetPR) -> some View {
-        HStack(spacing: 6) {
-            Text(pr.repo)
-                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
-                .lineLimit(1).truncationMode(.middle).layoutPriority(0)
+        HStack(alignment: .top, spacing: 8) {
+            // Fixed-width PR number so it never wraps or gets squeezed.
             Text("#\(pr.prNumber)")
                 .font(.system(size: 11, weight: .medium)).foregroundStyle(.blue)
-            Text(pr.title.isEmpty ? pr.branch : pr.title)
-                .font(.system(size: 11)).lineLimit(1).truncationMode(.tail).layoutPriority(1)
-            Spacer(minLength: 0)
+                .lineLimit(1).fixedSize()
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pr.title.isEmpty ? pr.branch : pr.title)
+                    .font(.system(size: 11))
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(pr.repo)
+                    .font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if pr.prURL != nil {
+                Image(systemName: "arrow.up.right.square")
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+            }
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
@@ -254,7 +264,7 @@ struct ShipsView: View {
         .onTapGesture {
             if let u = pr.prURL, let url = URL(string: u) { NSWorkspace.shared.open(url) }
         }
-        .help(pr.prURL ?? "\(pr.repo) #\(pr.prNumber)")
+        .help(pr.title.isEmpty ? "\(pr.repo) #\(pr.prNumber)" : pr.title)
     }
 
     private func repoGroup(repo: String, ships: [Ship]) -> some View {
