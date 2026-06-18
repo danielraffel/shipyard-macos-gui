@@ -185,9 +185,16 @@ struct ShipsView: View {
     /// Local ships presented in the uniform fleet shape so "All" can list this
     /// Mac alongside the remotes.
     private var localShipsAsFleetPRs: [FleetPR] {
-        visibleShips.map {
-            FleetPR(machine: AppStore.thisMacFilter, repo: $0.repo, prNumber: $0.prNumber,
-                    title: $0.prTitle, branch: $0.branch, prURL: nil)
+        visibleShips.map { ship in
+            let status: FleetPR.Status
+            switch ship.overallStatus {
+            case .failed: status = .failed
+            case .passed: status = .passed
+            default: status = .pending
+            }
+            return FleetPR(machine: AppStore.thisMacFilter, repo: ship.repo,
+                           prNumber: ship.prNumber, title: ship.prTitle,
+                           branch: ship.branch, prURL: nil, status: status)
         }
     }
 
@@ -237,8 +244,27 @@ struct ShipsView: View {
         }
     }
 
+    private func fleetStatusColor(_ s: FleetPR.Status) -> Color {
+        switch s {
+        case .passed: return ShipyardColors.green
+        case .failed: return ShipyardColors.red
+        case .pending: return .secondary
+        }
+    }
+
+    private func fleetStatusLabel(_ s: FleetPR.Status) -> String {
+        switch s {
+        case .passed: return "passed"
+        case .failed: return "failed"
+        case .pending: return "awaiting"
+        }
+    }
+
     private func fleetPRRow(_ pr: FleetPR) -> some View {
         HStack(alignment: .top, spacing: 8) {
+            // Last-known CI status (from the remote Mac's ship-state, no API call).
+            Circle().fill(fleetStatusColor(pr.status))
+                .frame(width: 6, height: 6).padding(.top, 4)
             // Fixed-width PR number so it never wraps or gets squeezed.
             Text("#\(pr.prNumber)")
                 .font(.system(size: 11, weight: .medium)).foregroundStyle(.blue)
@@ -258,13 +284,17 @@ struct ShipsView: View {
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.04)))
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.background.opacity(0.5))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary, lineWidth: 0.5))
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             if let u = pr.prURL, let url = URL(string: u) { NSWorkspace.shared.open(url) }
         }
-        .help(pr.title.isEmpty ? "\(pr.repo) #\(pr.prNumber)" : pr.title)
+        .help("\(pr.repo) #\(pr.prNumber) · \(fleetStatusLabel(pr.status))\n\(pr.title.isEmpty ? pr.branch : pr.title)\nbranch: \(pr.branch)\(pr.prURL != nil ? "\nclick to open on GitHub" : "")")
     }
 
     private func repoGroup(repo: String, ships: [Ship]) -> some View {

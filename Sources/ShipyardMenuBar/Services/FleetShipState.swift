@@ -11,6 +11,11 @@ struct FleetPR: Identifiable, Equatable {
     let title: String
     let branch: String
     let prURL: String?
+    /// Last-recorded CI status from the remote Mac's ship-state evidence
+    /// (no GitHub call). May be stale, but reflects what that Mac knows.
+    let status: Status
+
+    enum Status: Equatable { case passed, failed, pending }
 
     // Stable across refreshes: a PR is identified by machine + repo + number.
     var id: String { "\(machine)\t\(repo)\t\(prNumber)" }
@@ -88,9 +93,20 @@ enum FleetShipState {
                 prNumber: e.pr,
                 title: e.prTitle ?? e.commitSubject ?? "",
                 branch: e.branch ?? "",
-                prURL: e.prUrl
+                prURL: e.prUrl,
+                status: status(from: e.evidenceSnapshot)
             )
         }
+    }
+
+    /// Derive a coarse CI status from a ship-state evidence snapshot — a
+    /// `{target: "pass"|"fail"}` map. Any fail ⇒ failed; some pass and no fail ⇒
+    /// passed; nothing recorded ⇒ pending (awaiting / not dispatched).
+    static func status(from evidence: [String: String]?) -> FleetPR.Status {
+        let values = (evidence ?? [:]).values.map { $0.lowercased() }
+        if values.contains("fail") { return .failed }
+        if values.contains("pass") { return .passed }
+        return .pending
     }
 
     private static func runCapturing(
