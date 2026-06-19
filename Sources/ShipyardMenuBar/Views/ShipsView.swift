@@ -8,6 +8,11 @@ struct ShipsView: View {
     @State private var isRestoring: Bool = false
     /// Expanded fleet PR rows (by FleetPR.id) — shows that Mac's last-known lanes.
     @State private var expandedFleetPRs: Set<String> = []
+    /// Drives auto-refresh of the fleet view while it's on screen. Fires only when
+    /// a remote filter is selected (showFleetView), so the popover-open case keeps
+    /// the other Macs' PRs current without any GitHub API calls — the pull is the
+    /// quota-free SSH ship-state fetch.
+    private let fleetAutoRefresh = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ScrollView {
@@ -22,6 +27,11 @@ struct ShipsView: View {
                     machineFilterBar
                     if showFleetView {
                         fleetPRsView
+                            .onReceive(fleetAutoRefresh) { _ in
+                                // Only while a remote filter is showing — keeps the
+                                // other Macs' rows fresh without growing GitHub quota.
+                                if showFleetView { store.refreshFleetPRs() }
+                            }
                     } else {
                         trackedPRGroupsView
                     }

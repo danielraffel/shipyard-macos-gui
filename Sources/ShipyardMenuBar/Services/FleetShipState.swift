@@ -42,18 +42,39 @@ enum FleetShipState {
     /// from ~/.config/shipyard/fleet-hosts.json — `[{"name":"M3","ssh":"macstudio"}, …]`.
     /// Missing/garbage file ⇒ no remote hosts (feature simply shows only This Mac).
     static func hosts(path: String = defaultHostsPath()) -> [FleetHost] {
-        guard let data = FileManager.default.contents(atPath: path),
-              let hosts = try? JSONDecoder().decode([FleetHost].self, from: data)
-        else { return [] }
-        // Drop blanks/dupes; keep order. Reject a leading "-" so a config value
-        // can't be parsed by ssh as an option (e.g. -oProxyCommand=…).
-        var seen = Set<String>()
-        return hosts.filter {
-            !$0.name.isEmpty && !$0.ssh.isEmpty
-                && !$0.ssh.hasPrefix("-") && !$0.name.hasPrefix("-")
-                && seen.insert($0.ssh).inserted
+        // Cache the parsed result keyed by the file's mtime so a SwiftUI re-render
+        // storm (fleetMachineNames is read every render) doesn't re-read + re-decode
+        // the JSON each time. A cheap stat detects edits and invalidates the cache.
+        let mtime = (try? FileManager.default
+            .attributesOfItem(atPath: path)[.modificationDate]) as? Date
+        hostsCacheLock.lock()
+        if let c = hostsCache, c.path == path, c.mtime == mtime {
+            hostsCacheLock.unlock(); return c.hosts
         }
+        hostsCacheLock.unlock()
+
+        let parsed: [FleetHost] = {
+            guard let data = FileManager.default.contents(atPath: path),
+                  let hosts = try? JSONDecoder().decode([FleetHost].self, from: data)
+            else { return [] }
+            // Drop blanks/dupes; keep order. Reject a leading "-" so a config value
+            // can't be parsed by ssh as an option (e.g. -oProxyCommand=…).
+            var seen = Set<String>()
+            return hosts.filter {
+                !$0.name.isEmpty && !$0.ssh.isEmpty
+                    && !$0.ssh.hasPrefix("-") && !$0.name.hasPrefix("-")
+                    && seen.insert($0.ssh).inserted
+            }
+        }()
+
+        hostsCacheLock.lock()
+        hostsCache = (path: path, mtime: mtime, hosts: parsed)
+        hostsCacheLock.unlock()
+        return parsed
     }
+
+    private static let hostsCacheLock = NSLock()
+    private static var hostsCache: (path: String, mtime: Date?, hosts: [FleetHost])?
 
     static func defaultHostsPath(home: String = NSHomeDirectory()) -> String {
         (home as NSString).appendingPathComponent(".config/shipyard/fleet-hosts.json")

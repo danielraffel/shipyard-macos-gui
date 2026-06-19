@@ -77,6 +77,22 @@ final class FleetShipStateTests: XCTestCase {
         XCTAssertEqual(pr.lanes.first { $0.target == "mac" }?.phase, "test")
     }
 
+    func testHostsCacheInvalidatesOnFileChange() {
+        let p = tmp("""
+        [{"name":"M3","ssh":"macstudio"}]
+        """)
+        defer { try? FileManager.default.removeItem(atPath: p) }
+        XCTAssertEqual(FleetShipState.hosts(path: p).map(\.name), ["M3"])
+        // Rewrite the SAME path with new content + a bumped mtime; the mtime-keyed
+        // cache must not serve the stale single-host result.
+        try? """
+        [{"name":"M3","ssh":"macstudio"},{"name":"M1","ssh":"m1"}]
+        """.write(toFile: p, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: p)
+        XCTAssertEqual(FleetShipState.hosts(path: p).map(\.name), ["M3", "M1"])
+    }
+
     func testDecodeBareArrayShape() {
         let arr = """
         [{"pr":1,"repo":"a/b","pr_title":"t"}]

@@ -55,6 +55,33 @@ struct CIServingLane: Identifiable, Equatable {
             .appendingPathComponent("Library/LaunchAgents"),
         fileManager: FileManager = .default
     ) -> [CIServingLane] {
+        // Cache the discovered lane SET keyed by the agents-dir mtime so repeated
+        // renders don't re-scan + regex every plist. The directory's mtime bumps
+        // when a plist is added/removed (a new lane installed), which is the only
+        // thing that changes the lane set — serving on/off state is queried
+        // separately. Bypassed for tests (which inject a non-default fileManager).
+        let useCache = fileManager === FileManager.default
+        if useCache {
+            let mtime = (try? fileManager
+                .attributesOfItem(atPath: agentsDirectory)[.modificationDate]) as? Date
+            discoverCacheLock.lock()
+            if let c = discoverCache, c.dir == agentsDirectory, c.mtime == mtime {
+                discoverCacheLock.unlock(); return c.lanes
+            }
+            discoverCacheLock.unlock()
+            let lanes = scanLanes(agentsDirectory: agentsDirectory, fileManager: fileManager)
+            discoverCacheLock.lock()
+            discoverCache = (dir: agentsDirectory, mtime: mtime, lanes: lanes)
+            discoverCacheLock.unlock()
+            return lanes
+        }
+        return scanLanes(agentsDirectory: agentsDirectory, fileManager: fileManager)
+    }
+
+    private static let discoverCacheLock = NSLock()
+    private static var discoverCache: (dir: String, mtime: Date?, lanes: [CIServingLane])?
+
+    private static func scanLanes(agentsDirectory: String, fileManager: FileManager) -> [CIServingLane] {
         guard let files = try? fileManager.contentsOfDirectory(atPath: agentsDirectory)
         else { return [] }
         let prefix = "com.danielraffel.pulp."
