@@ -180,7 +180,13 @@ struct ShipsView: View {
             }
             .padding(.horizontal, 4)
             .help("See PRs tracked by other Macs in the pool. Read from each Mac's local Shipyard over Tailscale — never the GitHub API, so it costs no rate-limit budget.")
-            .onAppear { if store.prMachineFilter != AppStore.thisMacFilter { store.refreshFleetPRs() } }
+            .onAppear {
+                // Snap a stale persisted filter (a machine no longer in the config)
+                // back to This Mac so the picker never shows a blank selection.
+                let valid = Set([AppStore.thisMacFilter, AppStore.allMacsFilter] + names)
+                if !valid.contains(store.prMachineFilter) { store.prMachineFilter = AppStore.thisMacFilter }
+                if store.prMachineFilter != AppStore.thisMacFilter { store.refreshFleetPRs() }
+            }
         }
     }
 

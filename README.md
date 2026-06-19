@@ -17,10 +17,21 @@ into a shell:
 - Click straight through to the GitHub run, the PR, or logs.
 - See active Namespace runner instances from `nsc list` without spending
   GitHub API quota.
-- **Serve CI from this Mac** — a one-tap toggle to pull your machine in or out
-  of the build pool, so it isn't running CI jobs while you're working.
+- **Serve CI from this Mac** — per-lane toggles (auto-discovered: macOS gate /
+  release / sanitizer, Linux, Windows) plus a master "all lanes" switch to pull
+  your machine in or out of the build pool, and a host-wide macOS-VM cap.
+- **See other Macs' PRs** — a machine selector on Tracked PRs (This Mac / All /
+  per-machine) reads each Mac's *local* ship-state over Tailscale, so you can
+  glance at what M1 / Studio are managing **without spending any GitHub API
+  quota**.
+- **Group untracked Actions runs** by All / by-machine / by-runner.
 - `shipyard doctor` output in a dedicated pane.
 - Notifications on merge / fail / all-green.
+
+GitHub status polling can run through a **GitHub App installation token** (its own
+12,500/hr bucket) instead of your personal 5,000/hr PAT — the app prefers `ghapp`
+when it's installed and falls back to `gh`. Combined with live mode (below), the
+app is designed to stay well clear of your rate-limit budget.
 
 It was my first test of [Claude Design](https://claude.ai/design) — built
 on an airplane — so treat the polish accordingly.
@@ -97,16 +108,22 @@ or system PATH locations.
 ## Serve CI builds from this Mac
 
 If this Mac is set up as a self-hosted runner, **Settings → Serve CI builds from
-this Mac** shows a per-platform toggle (today: macOS, via the Tart runner
-installed by pulp's `tools/ci/setup-ci-host.sh`). Flip it **on** and the Mac
-joins the pool and runs CI jobs in throwaway VMs; flip it **off** while you're
-working so builds don't run on your machine.
+this Mac** shows one toggle per **lane this host actually has** — discovered by
+scanning its runner launchd agents, so each Mac shows its real lanes (e.g. macOS
+gate / release / sanitizer, Linux, Windows) rather than a hardcoded set. Flip a
+lane **on** and the Mac joins that part of the pool and runs CI jobs in throwaway
+VMs; flip it **off** while you're working so builds don't run on your machine.
 
-The toggle loads/unloads the runner's launchd agent and reflects live state —
-*Not serving*, *Serving · idle*, or *Serving · building (N)* when VMs are
-active. Turning it off mid-build asks before cancelling in-progress builds.
-The row only appears once a runner is installed; the design is structured so
-Linux/Windows lanes can be added later as additional rows.
+- **Master "All lanes" switch** (shown when there's more than one lane) joins or
+  leaves the whole pool in one tap. Turning everything off mid-build warns first,
+  summing the in-progress builds across lanes.
+- Each toggle loads/unloads the lane's launchd agent and reflects live state —
+  *Not set up on this Mac*, *Not serving*, *Serving · idle*, *Waiting · N ready*
+  (a warm VM available for work), or *Building N jobs* — derived from the GitHub
+  **runner** state for that lane's labels.
+- **Max macOS VMs at once** — a 1–2 control (Apple allows two macOS guests per
+  host). Set it to 1 to keep a slot free while you work. The tartci macOS runners
+  read it live, so changes take effect without reloading anything.
 
 ## Namespace instances
 
@@ -136,15 +153,23 @@ The Runners view separates three different data sources so rows do not
 overlap or imply more certainty than the app has:
 
 - **Tracked PRs** are Shipyard-managed work from local
-  `shipyard ship-state list`. These are the only rows rendered as PR cards
+  `shipyard ship-state list`. These are the only rows rendered as full PR cards
   with Shipyard actions such as retargeting or adding lanes. They are grouped
-  by repo, with optional worktree sub-grouping.
+  by repo, with optional worktree sub-grouping. A **machine selector** (This Mac
+  / All / per-machine) lets you also view PRs tracked by *other* Macs in the
+  pool — pulled from each Mac's local ship-state over Tailscale/SSH, so it makes
+  **no GitHub API calls**. Other-machine rows are read-only: they show a
+  last-known status dot, expand to that Mac's last-recorded lanes (target ·
+  pass/fail, from its ship-state), and click through to the PR on GitHub. Set up
+  the fleet by listing the other Macs in `~/.config/shipyard/fleet-hosts.json`
+  (`[{"name":"M1","ssh":"macbook"}, …]`); without it, only This Mac is shown.
 - **GitHub Actions not tracked by Shipyard** are workflow runs from the
   existing `gh run list` cache that do not match local Shipyard state by
   branch or SHA. The GUI intentionally does not call `gh pr list`; GitHub API
-  quota is reserved for CI status. These rows may be PR-related, main/tag
-  workflows, manual dispatches, or scheduled jobs, so they are rendered as
-  Actions runs, not PR cards.
+  quota is reserved for CI status. A selector groups them **All / by-machine /
+  by-runner** (the Mac or runner that executed the job). These rows may be
+  PR-related, main/tag workflows, manual dispatches, or scheduled jobs, so they
+  are rendered as Actions runs, not PR cards.
 - **Namespace instances** are raw runner VMs from `nsc list`. They are
   infrastructure, not PRs or jobs.
 
@@ -199,6 +224,8 @@ shipyard-macos-gui/
 │   │   ├── StatusItemController.swift  # NSStatusItem + NSPopover
 │   │   ├── ShipStatePoller.swift   # ship-state list via daemon IPC/CLI
 │   │   ├── ShipyardCLIRunner.swift # NDJSON subprocess actor
+│   │   ├── FleetShipState.swift    # other Macs' ship-state over SSH (quota-free)
+│   │   ├── CIServingService.swift  # serve-lane discovery + launchd toggles
 │   │   └── LiveMode/DaemonClient.swift # daemon IPC + live webhook bridge
 │   └── Views/                      # SwiftUI views
 ├── scripts/
