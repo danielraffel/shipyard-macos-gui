@@ -90,8 +90,47 @@ enum LiveUpdateStatus: Equatable {
         /// Generic "daemon started but something internal failed"
         /// bucket. Used for cases we can't attribute more cleanly.
         case serverStartFailed(String)
+        /// GitHub authentication is failing — the daemon fell back to an
+        /// invalid or rate-limited token (e.g. an ambient `gh` token at the
+        /// anonymous 60/hr limit instead of the GitHub App token). Distinct
+        /// from a tunnel/live-mode failure: the daemon is up, but live
+        /// GitHub updates are degraded at the auth layer. The associated
+        /// value is the daemon's human-readable diagnostic detail.
+        case githubAuthDegraded(String)
 
         static let webhookScopeCommand = "gh auth refresh -h github.com -s admin:repo_hook"
+
+        /// One-time command the user runs to repair a degraded GitHub token
+        /// (import the GitHub App-token config instead of the anonymous
+        /// ambient `gh` token).
+        static let githubAuthDoctorCommand = "shipyard auth doctor"
+
+        /// Wire discriminator the daemon uses to signal a GitHub auth
+        /// failure as the pause cause. It travels inside the status frame's
+        /// `last_error` string — mirroring how the webhook-scope hint
+        /// travels — formatted as `github_auth_degraded: <detail>`.
+        static let githubAuthDegradedWireCode = "github_auth_degraded"
+
+        /// If `daemonError` carries the GitHub-auth-degraded discriminator,
+        /// returns the human-readable detail (never empty); otherwise nil.
+        /// The daemon-status mapper uses this to turn a `last_error` string
+        /// into `.githubAuthDegraded`.
+        static func githubAuthDegradedDetail(fromDaemonError daemonError: String) -> String? {
+            let trimmed = daemonError.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.lowercased().hasPrefix(githubAuthDegradedWireCode) else {
+                return nil
+            }
+            let remainder = trimmed.dropFirst(githubAuthDegradedWireCode.count)
+            let detail = remainder.trimmingCharacters(
+                in: CharacterSet(charactersIn: ": ").union(.whitespacesAndNewlines)
+            )
+            return detail.isEmpty ? "invalid or rate-limited GitHub token" : detail
+        }
+
+        var isGithubAuthDegraded: Bool {
+            if case .githubAuthDegraded = self { return true }
+            return false
+        }
 
         var isWebhookScopeMissing: Bool {
             switch self {
@@ -124,6 +163,8 @@ enum LiveUpdateStatus: Equatable {
             switch self {
             case .userDisabled:
                 return "Polling every 60s"
+            case .githubAuthDegraded:
+                return "GitHub authentication failing - GitHub polling paused"
             default:
                 return "Live updates unavailable - GitHub polling paused"
             }
@@ -132,6 +173,9 @@ enum LiveUpdateStatus: Equatable {
         var headerLabel: String {
             if isWebhookScopeMissing {
                 return "hook auth"
+            }
+            if isGithubAuthDegraded {
+                return "auth failing"
             }
             if self != .userDisabled {
                 return "paused"
@@ -160,6 +204,11 @@ enum LiveUpdateStatus: Equatable {
                 return "Tailscale Funnel couldn't come up: \(err). GitHub API polling is paused to protect your rate limit."
             case .serverStartFailed(let err):
                 return "Live mode setup failed: \(err). GitHub API polling is paused to protect your rate limit."
+            case .githubAuthDegraded(let detail):
+                return "GitHub auth is failing - Shipyard is using an invalid or "
+                    + "rate-limited token (\(detail)). Run `\(Self.githubAuthDoctorCommand)` "
+                    + "and import the App-token config. GitHub API polling is paused to "
+                    + "protect your rate limit."
             }
         }
     }

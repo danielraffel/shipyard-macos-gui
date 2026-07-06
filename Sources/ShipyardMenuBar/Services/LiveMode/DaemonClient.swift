@@ -280,6 +280,14 @@ final class DaemonClient {
         allowMissingTunnelDowngrade: Bool = true
     ) -> LiveUpdateStatus? {
         if let error = daemonStatus.lastError {
+            // Auth degradation (invalid / rate-limited GitHub token) is a
+            // distinct, actionable pause cause. The daemon tags it with the
+            // `github_auth_degraded` discriminator inside `last_error`, the
+            // same string channel the webhook-scope hint rides on.
+            if let detail = LiveUpdateStatus.PollingReason
+                .githubAuthDegradedDetail(fromDaemonError: error) {
+                return .polling(reason: .githubAuthDegraded(detail))
+            }
             let reason = LiveUpdateStatus.PollingReason.serverStartFailed(error)
             if reason.isWebhookScopeMissing {
                 return .polling(reason: reason)

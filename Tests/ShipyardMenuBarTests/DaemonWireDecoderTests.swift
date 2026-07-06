@@ -325,6 +325,67 @@ final class DaemonWireDecoderTests: XCTestCase {
         XCTAssertTrue(update?.blocksGitHubAPIPolling == true)
     }
 
+    // MARK: - GitHub auth-degraded pause reason
+
+    func test_githubAuthDegradedDiscriminatorParsesDetail() {
+        let detail = LiveUpdateStatus.PollingReason.githubAuthDegradedDetail(
+            fromDaemonError: "github_auth_degraded: token invalid (HTTP 401)"
+        )
+        XCTAssertEqual(detail, "token invalid (HTTP 401)")
+    }
+
+    func test_githubAuthDegradedDiscriminatorFallsBackWhenDetailEmpty() {
+        let detail = LiveUpdateStatus.PollingReason.githubAuthDegradedDetail(
+            fromDaemonError: "github_auth_degraded"
+        )
+        XCTAssertEqual(detail, "invalid or rate-limited GitHub token")
+    }
+
+    func test_githubAuthDegradedDiscriminatorIgnoresUnrelatedErrors() {
+        XCTAssertNil(LiveUpdateStatus.PollingReason.githubAuthDegradedDetail(
+            fromDaemonError: "tailscale funnel failed"
+        ))
+    }
+
+    func test_statusUpdateMapsGithubAuthDegradedError() {
+        let status = DaemonStatus(
+            tunnelBackend: "tailscale",
+            tunnelURL: URL(string: "https://shipyard.example"),
+            subscribers: 1,
+            registeredRepos: ["org/repo"],
+            lastError: "github_auth_degraded: anonymous rate limit (60/hr) — App token not loaded"
+        )
+        let update = DaemonClient.statusUpdate(
+            daemonStatus: status,
+            lastEventAt: nil,
+            allowMissingTunnelDowngrade: false
+        )
+        XCTAssertEqual(
+            update,
+            .polling(reason: .githubAuthDegraded(
+                "anonymous rate limit (60/hr) — App token not loaded"
+            ))
+        )
+        // Auth is bad, so GitHub API polling must pause (don't hammer with a
+        // known-bad token) and drop to the conservative cadence.
+        XCTAssertTrue(update?.blocksGitHubAPIPolling == true)
+        XCTAssertTrue(update?.usesConservativeGitHubPollingCadence == true)
+    }
+
+    func test_githubAuthDegradedHeaderLabelAndUserFacing() {
+        let reason = LiveUpdateStatus.PollingReason.githubAuthDegraded("HTTP 401")
+        XCTAssertTrue(reason.isGithubAuthDegraded)
+        XCTAssertFalse(reason.isWebhookScopeMissing)
+        XCTAssertTrue(reason.shouldWarn)
+        XCTAssertEqual(reason.headerLabel, "auth failing")
+        XCTAssertTrue(reason.userFacing.contains("shipyard auth doctor"))
+        XCTAssertTrue(reason.userFacing.contains("HTTP 401"))
+        XCTAssertEqual(
+            LiveUpdateStatus.PollingReason.githubAuthDoctorCommand,
+            "shipyard auth doctor"
+        )
+    }
+
     func test_runtimePathsDecodeRustPathsOutput() {
         let json = """
         {
