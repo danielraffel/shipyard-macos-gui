@@ -160,6 +160,9 @@ struct SettingsView: View {
                         if reason.isWebhookScopeMissing {
                             copyWebhookScopeCommand
                         }
+                        if reason.isGithubAuthDegraded {
+                            copyAuthDoctorCommand
+                        }
                     }
                 }
             }
@@ -190,6 +193,30 @@ struct SettingsView: View {
         .padding(.top, 2)
     }
 
+    private var copyAuthDoctorCommand: some View {
+        HStack(spacing: 6) {
+            Text(LiveUpdateStatus.PollingReason.githubAuthDoctorCommand)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Button {
+                ClipboardToast.shared.copy(
+                    LiveUpdateStatus.PollingReason.githubAuthDoctorCommand,
+                    label: "Copied command"
+                )
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.blue)
+            .help("Copy GitHub auth doctor command")
+        }
+        .padding(.top, 2)
+    }
+
     private var pollingTitle: String {
         if store.liveStartupPending {
             return "Starting live updates"
@@ -209,6 +236,9 @@ struct SettingsView: View {
         if reason?.isWebhookScopeMissing == true {
             return "key.fill"
         }
+        if reason?.isGithubAuthDegraded == true {
+            return "key.slash.fill"
+        }
         if store.liveUpdateMode == .on && reason != nil {
             return "exclamationmark.triangle.fill"
         }
@@ -220,6 +250,9 @@ struct SettingsView: View {
             return .secondary
         }
         if reason?.isWebhookScopeMissing == true {
+            return .orange
+        }
+        if reason?.isGithubAuthDegraded == true {
             return .orange
         }
         if store.liveUpdateMode == .on && reason != nil {

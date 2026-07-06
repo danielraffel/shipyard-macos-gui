@@ -142,6 +142,13 @@ struct PopoverView: View {
                 if let reason, reason.isWebhookScopeMissing {
                     return (.orange, reason.headerLabel)
                 }
+                if let reason, reason.isGithubAuthDegraded {
+                    // Name the auth failure specifically ("auth failing")
+                    // instead of the generic "updates paused" — it's
+                    // actionable (the token is bad / rate-limited). Full
+                    // guidance stays in the tooltip + Settings.
+                    return (.orange, reason.headerLabel)
+                }
                 if store.liveStatus.blocksGitHubAPIPolling {
                     // Always say "updates paused" here — PollingReason.headerLabel
                     // returns the generic "paused" for most degraded cases
