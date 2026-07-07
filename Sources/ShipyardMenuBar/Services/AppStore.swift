@@ -891,6 +891,9 @@ final class AppStore: ObservableObject {
         stopGitHubPolling()
         stopRateLimitPolling()
         stopNamespaceActivityPolling()
+        stopHostHealthPolling()
+        tartciLeaseTask?.cancel()
+        tartciLeaseTask = nil
         cancelGitHubDetailWork()
         servingRefreshTask?.cancel()
         servingToggleTasks.values.forEach { $0.cancel() }
@@ -914,6 +917,9 @@ final class AppStore: ObservableObject {
             startRateLimitPolling()
         }
         startNamespaceActivityPolling()
+        startHostHealthPolling()
+        refreshTartciLeases()
+        refreshLeaseParticipation()
         enrichmentGeneration += 1
     }
 
@@ -1402,6 +1408,21 @@ final class AppStore: ObservableObject {
         var status = servingStatusByLane[lane.id] ?? .unknown
         status.isToggling = true
         servingStatusByLane[lane.id] = status
+        // Host-wide native-build participation follows the pool toggles: turning
+        // a lane ON opts this host in; turning one OFF opts out only when no other
+        // lane is still serving. This lets a future governor refuse to place a
+        // native-build lease on an opted-out host — launchd load/unload alone only
+        // stops GitHub-dispatched job pickup. (Read pre-toggle serving state of
+        // OTHER lanes; the toggled lane is excluded so its own in-flight change
+        // doesn't count.)
+        let otherLanesServing = servingLanes.contains {
+            $0.id != lane.id && (servingStatusByLane[$0.id]?.serving ?? false)
+        }
+        let participating = LeaseParticipation.hostParticipating(
+            togglingOn: on, otherLanesServing: otherLanesServing)
+        if LeaseParticipation.write(participating) {
+            leaseParticipating = participating
+        }
         let repos = Array(knownRepos)
         servingToggleTasks[lane.id] = Task { [weak self] in
             _ = await CIServingService.setServing(on, lane: lane)
@@ -1417,6 +1438,75 @@ final class AppStore: ObservableObject {
             guard !Task.isCancelled else { return }
             self.servingStatusByLane[lane.id] = fresh
         }
+    }
+
+    // MARK: - Host resource governor (health + tartci leases + participation)
+
+    /// Live host vitals (1-min load, memory pressure, free RAM) — the "see what
+    /// the governor sees" panel. nil until the first probe lands.
+    @Published private(set) var hostHealth: HostHealth?
+
+    /// tartci lease-governor usage on this Mac. nil until the first probe;
+    /// `.notInstalled` when the governor binary isn't present.
+    @Published private(set) var tartciLeaseState: TartciLeases.State?
+
+    /// This Mac's native-build participation flag, mirrored from the on-disk
+    /// `~/.config/tartci/native-build-participation`. Kept in sync by `setServing`
+    /// and re-read by `refreshLeaseParticipation`.
+    @Published private(set) var leaseParticipating: Bool = LeaseParticipation.read()
+
+    private var hostHealthTask: Task<Void, Never>?
+    private var tartciLeaseTask: Task<Void, Never>?
+
+    /// Poll host vitals every 5s while the app runs. Cheap — in-process sysctl /
+    /// host_statistics64 reads, no subprocess. Idempotent (cancels any prior
+    /// task). The read hops to a utility queue so the SwiftUI render path never
+    /// waits on a kernel call, then republishes on the main actor.
+    func startHostHealthPolling() {
+        hostHealthTask?.cancel()
+        hostHealthTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let health = await Task.detached(priority: .utility) {
+                    HostHealthProbe.read()
+                }.value
+                if Task.isCancelled { break }
+                await MainActor.run { self?.hostHealth = health }
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+        }
+    }
+
+    func stopHostHealthPolling() {
+        hostHealthTask?.cancel()
+        hostHealthTask = nil
+    }
+
+    /// Refresh host vitals once (e.g. on section appear) without waiting for the
+    /// 5s poller.
+    func refreshHostHealth() {
+        Task { [weak self] in
+            let health = await Task.detached(priority: .utility) {
+                HostHealthProbe.read()
+            }.value
+            await MainActor.run { self?.hostHealth = health }
+        }
+    }
+
+    /// Refresh the tartci lease snapshot once. Spawns a bounded `tartci … --json`
+    /// probe off-main; publishes the resulting state. Idempotent.
+    func refreshTartciLeases() {
+        tartciLeaseTask?.cancel()
+        tartciLeaseTask = Task { [weak self] in
+            let state = await TartciLeases.read()
+            if Task.isCancelled { return }
+            await MainActor.run { self?.tartciLeaseState = state }
+        }
+    }
+
+    /// Re-read the participation flag from disk (e.g. a CLI or another tool on
+    /// this Mac changed it) so the UI reflects the true on-disk state.
+    func refreshLeaseParticipation() {
+        leaseParticipating = LeaseParticipation.read()
     }
 
     // MARK: - Local emulated x86_64 smoke ("Run local smoke checks")
