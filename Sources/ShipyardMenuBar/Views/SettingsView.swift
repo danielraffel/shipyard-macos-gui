@@ -8,6 +8,8 @@ struct SettingsView: View {
         Form {
             generalSection
             serveSection
+            hostHealthSection
+            governorSection
             smokeSection
             cliSection
             liveUpdatesSection
@@ -582,6 +584,156 @@ struct SettingsView: View {
         if status.building > 0 { return .green }   // a build is actually running
         if status.waiting > 0 { return .orange }   // serving, warm VM waiting for work
         return .secondary                          // serving, nothing up (idle)
+    }
+
+    // MARK: - Host health ("see what the governor sees")
+
+    /// Live vitals for THIS Mac — load, memory pressure, free RAM. The same
+    /// signals a resource governor weighs before granting a native-build lease.
+    private var hostHealthSection: some View {
+        Section("Host health") {
+            if let health = store.hostHealth {
+                hostStatRow(title: "Load average (1m)", value: health.loadSummary)
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Memory pressure")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("Green normal · orange warning · red critical.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(pressureColor(health.pressure))
+                            .frame(width: 7, height: 7)
+                        Text(health.pressure.label)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                hostStatRow(
+                    title: "Free RAM",
+                    value: "\(health.freeSummary) of \(HostHealth.formatBytes(health.totalBytes))")
+            } else {
+                Text("Reading host vitals…")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Text("Live view of this Mac's load, memory pressure, and free RAM — the same signals a resource governor weighs before running a build here.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        .onAppear { store.refreshHostHealth() }
+    }
+
+    private func hostStatRow(title: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+            Spacer()
+            Text(value)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func pressureColor(_ pressure: MemoryPressure) -> Color {
+        switch pressure {
+        case .normal:   return .green
+        case .warning:  return .orange
+        case .critical: return .red
+        case .unknown:  return .secondary
+        }
+    }
+
+    // MARK: - Lease governor (tartci leases + native-build participation)
+
+    /// The read side of the host-resource governor: how many cores / MB of RAM
+    /// tartci has leased out on this Mac vs. the host budget, plus this host's
+    /// native-build participation flag (driven by the serve toggles above).
+    private var governorSection: some View {
+        Section("Lease governor") {
+            governorUsageRow
+            participationRow
+            Text("The tartci governor stops CI and native builds from oversubscribing this Mac. Opting out (turning off pool participation above) also tells the governor not to place native-build leases here.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        .onAppear { store.refreshTartciLeases(); store.refreshLeaseParticipation() }
+    }
+
+    @ViewBuilder
+    private var governorUsageRow: some View {
+        switch store.tartciLeaseState {
+        case .available(let snapshot):
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text("Leases")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Text(snapshot.summary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 8) {
+                    if let tier = snapshot.tier {
+                        Text("tier: \(tier)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("\(snapshot.heldLeases) held")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .notInstalled:
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                Text("Governor not installed")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        case .unavailable(let reason):
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Text(reason)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        case nil:
+            Text("Checking governor…")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Read-only reflection of the on-disk native-build participation flag. It is
+    /// written by the serve toggles above (opting this host in/out of leases),
+    /// so it's shown here for transparency rather than as a second control.
+    private var participationRow: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Native-build participation")
+                    .font(.system(size: 12, weight: .medium))
+                Text(store.leaseParticipating
+                     ? "This Mac accepts native-build leases."
+                     : "Opted out — the governor won't lease this Mac.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(store.leaseParticipating ? Color.green : Color.secondary)
+                    .frame(width: 7, height: 7)
+                Text(store.leaseParticipating ? "Participating" : "Opted out")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     // MARK: - Run local smoke checks (emulated x86_64)
