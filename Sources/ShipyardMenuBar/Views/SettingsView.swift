@@ -527,12 +527,13 @@ struct SettingsView: View {
         return s
     }
 
-    private func handleServeToggleAll(_ on: Bool, lanes: [CIServingLane]) {
-        for lane in lanes { store.setServing(on, lane: lane) }
-    }
-
     private func handleMasterToggle(_ on: Bool, lanes: [CIServingLane]) {
-        guard !on else { handleServeToggleAll(true, lanes: lanes); return }
+        // The whole-pool switch delegates to the single `tartci pool {on|off}`
+        // implementation via the store (which unloads/loads every runner agent —
+        // including the GitHub-native `actions.runner.*` ones the per-lane
+        // discovery doesn't cover — and owns the participation flag). Falls back to
+        // a per-lane launchctl fan-out inside the store when tartci is absent.
+        guard !on else { store.setAllServing(true); return }
         // Turning the whole pool OFF — warn once if any lane has a build actually
         // running (busy runner), summing across lanes, before cancelling them all.
         let buildingLanes = lanes.map { store.status(for: $0) }.filter { $0.building > 0 }
@@ -548,7 +549,7 @@ struct SettingsView: View {
             alert.addButton(withTitle: "Keep Serving")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        handleServeToggleAll(false, lanes: lanes)
+        store.setAllServing(false)
     }
 
     private func serveRow(_ lane: CIServingLane) -> some View {
