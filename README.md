@@ -20,6 +20,15 @@ into a shell:
 - **Serve CI from this Mac** — per-lane toggles (auto-discovered: macOS gate /
   release / sanitizer, Linux, Windows) plus a master "all lanes" switch to pull
   your machine in or out of the build pool, and a host-wide macOS-VM cap.
+- **Governor panel** — a "see what the governor sees" read-out of this Mac's
+  live vitals (1-minute load, memory pressure, available RAM) and the tartci
+  host build-lease usage (cores / RAM leased vs. the host budget, leases held).
+  Load + memory are read in-process; the lease figures come from shelling
+  `tartci leases --json` (falling back to `tartci status --json`), so the panel
+  reads "governor not installed" on a host without tartci. A **native-build
+  participation** toggle writes `~/.config/tartci/native-build-participation`
+  (`1`/`0`) — a sibling of the serve-CI switch that additionally lets a future
+  governor refuse to place a native-build lease on an opted-out host.
 - **See other Macs' PRs** — a machine selector on Tracked PRs (This Mac / All /
   per-machine) reads each Mac's *local* ship-state over Tailscale, so you can
   glance at what M1 / Studio are managing **without spending any GitHub API
