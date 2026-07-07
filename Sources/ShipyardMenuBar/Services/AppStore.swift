@@ -1343,6 +1343,8 @@ final class AppStore: ObservableObject {
     @Published private(set) var servingStatusByLane: [String: CIServingStatus] = [:]
     private var servingRefreshTask: Task<Void, Never>?
     private var servingToggleTasks: [String: Task<Void, Never>] = [:]
+    private var poolToggleTask: Task<Void, Never>?
+    private var leaseParticipationTask: Task<Void, Never>?
 
     /// Lanes installed on THIS host, discovered from its own runner LaunchAgents
     /// (so M1 shows its sanitizer lane, the Studio its gate lane, etc.).
@@ -1402,27 +1404,16 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// Toggle whether this Mac participates in the pool for `lane`.
+    /// Toggle whether this Mac serves a single lane. Per-lane granular control is
+    /// pure `launchctl load/unload` — host-wide native-build participation is no
+    /// longer a side-effect of a per-lane toggle; that is solely `tartci pool`'s
+    /// job (see `setAllServing`). This keeps one implementation of the host-level
+    /// opt-out and lets a lane be flipped without rewriting the participation flag.
     func setServing(_ on: Bool, lane: CIServingLane) {
         servingToggleTasks[lane.id]?.cancel()
         var status = servingStatusByLane[lane.id] ?? .unknown
         status.isToggling = true
         servingStatusByLane[lane.id] = status
-        // Host-wide native-build participation follows the pool toggles: turning
-        // a lane ON opts this host in; turning one OFF opts out only when no other
-        // lane is still serving. This lets a future governor refuse to place a
-        // native-build lease on an opted-out host — launchd load/unload alone only
-        // stops GitHub-dispatched job pickup. (Read pre-toggle serving state of
-        // OTHER lanes; the toggled lane is excluded so its own in-flight change
-        // doesn't count.)
-        let otherLanesServing = servingLanes.contains {
-            $0.id != lane.id && (servingStatusByLane[$0.id]?.serving ?? false)
-        }
-        let participating = LeaseParticipation.hostParticipating(
-            togglingOn: on, otherLanesServing: otherLanesServing)
-        if LeaseParticipation.write(participating) {
-            leaseParticipating = participating
-        }
         let repos = Array(knownRepos)
         servingToggleTasks[lane.id] = Task { [weak self] in
             _ = await CIServingService.setServing(on, lane: lane)
@@ -1440,6 +1431,52 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Turn the WHOLE pool on/off for this host, delegating to the single
+    /// `tartci pool {on|off}` implementation (writes the participation flag AND
+    /// unloads/loads every runner agent — including the `actions.runner.*`
+    /// GitHub-native runners the GUI's per-lane discovery doesn't cover). When
+    /// tartci isn't on PATH, falls back to the per-lane `launchctl` fan-out so the
+    /// GUI still works. Either way it re-reads true per-lane serving state and the
+    /// participation flag afterward.
+    func setAllServing(_ on: Bool) {
+        // We're driving the whole pool at once; cancel any per-lane toggle tasks
+        // so their delayed re-reads don't clobber the aggregate settle below.
+        servingToggleTasks.values.forEach { $0.cancel() }
+        servingToggleTasks.removeAll()
+        let lanes = CIServingLane.known
+        for lane in lanes {
+            var status = servingStatusByLane[lane.id] ?? .unknown
+            status.isToggling = true
+            servingStatusByLane[lane.id] = status
+        }
+        let repos = Array(knownRepos)
+        poolToggleTask?.cancel()
+        poolToggleTask = Task { [weak self] in
+            guard let self else { return }
+            let delegated = await CIPool.setParticipating(on)
+            if !delegated {
+                // tartci absent (or the CLI failed) → per-lane launchctl fan-out.
+                for lane in lanes { _ = await CIServingService.setServing(on, lane: lane) }
+            }
+            guard !Task.isCancelled else { return }
+            // launchd settles asynchronously; re-read every lane's true state.
+            var next: [String: CIServingStatus] = [:]
+            for lane in lanes {
+                var fresh = await CIServingService.status(for: lane)
+                if fresh.serving {
+                    let activity = await CIServingService.activity(for: lane, repos: repos)
+                    fresh.building = activity.building
+                    fresh.waiting = activity.waiting
+                }
+                fresh.isToggling = false
+                next[lane.id] = fresh
+            }
+            guard !Task.isCancelled else { return }
+            self.servingStatusByLane = next
+            self.refreshLeaseParticipation()
+        }
+    }
+
     // MARK: - Host resource governor (health + tartci leases + participation)
 
     /// Live host vitals (1-min load, memory pressure, free RAM) — the "see what
@@ -1450,9 +1487,11 @@ final class AppStore: ObservableObject {
     /// `.notInstalled` when the governor binary isn't present.
     @Published private(set) var tartciLeaseState: TartciLeases.State?
 
-    /// This Mac's native-build participation flag, mirrored from the on-disk
-    /// `~/.config/tartci/native-build-participation`. Kept in sync by `setServing`
-    /// and re-read by `refreshLeaseParticipation`.
+    /// This Mac's native-build participation flag. Sourced from
+    /// `tartci pool status --json` (the single implementation), falling back to
+    /// the on-disk `~/.config/tartci/native-build-participation` when tartci
+    /// isn't present. Re-read by `refreshLeaseParticipation`. Seeded from the file
+    /// for an instant first paint; the pool status refresh corrects it.
     @Published private(set) var leaseParticipating: Bool = LeaseParticipation.read()
 
     private var hostHealthTask: Task<Void, Never>?
@@ -1503,10 +1542,17 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// Re-read the participation flag from disk (e.g. a CLI or another tool on
-    /// this Mac changed it) so the UI reflects the true on-disk state.
+    /// Re-read host-wide participation from the single `tartci pool` source
+    /// (`tartci pool status --json`), falling back to the on-disk flag when tartci
+    /// isn't installed. Runs off-main (a bounded subprocess) and republishes on
+    /// the main actor. Idempotent.
     func refreshLeaseParticipation() {
-        leaseParticipating = LeaseParticipation.read()
+        leaseParticipationTask?.cancel()
+        leaseParticipationTask = Task { [weak self] in
+            let participating = await CIPool.readParticipating() ?? LeaseParticipation.read()
+            if Task.isCancelled { return }
+            await MainActor.run { self?.leaseParticipating = participating }
+        }
     }
 
     // MARK: - Local emulated x86_64 smoke ("Run local smoke checks")

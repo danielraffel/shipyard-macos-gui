@@ -6,62 +6,44 @@ final class LeaseParticipationTests: XCTestCase {
         NSTemporaryDirectory() + "native-build-participation-\(UUID().uuidString)/flag"
     }
 
+    private func write(_ contents: String, to path: String) throws {
+        let dir = (path as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try contents.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
     func testMissingFileDefaultsToParticipating() {
         // A freshly-onboarded host with no flag file is in the pool by default.
         XCTAssertTrue(LeaseParticipation.read(path: "/no/such/native-build-participation"))
         XCTAssertTrue(LeaseParticipation.defaultParticipating)
     }
 
-    func testWriteReadRoundTrip() {
+    func testReadZeroIsOptedOut() throws {
+        // The GUI no longer writes this file (tartci pool owns it); read still
+        // interprets the shell-written `0\n` / `1\n` form as opt-out / opt-in.
         let p = tmpPath()
-        defer { try? FileManager.default.removeItem(atPath: (p as NSString).deletingLastPathComponent) }
-        XCTAssertTrue(LeaseParticipation.write(false, path: p))
+        let dir = (p as NSString).deletingLastPathComponent
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try write("0\n", to: p)
         XCTAssertFalse(LeaseParticipation.read(path: p))
-        XCTAssertTrue(LeaseParticipation.write(true, path: p))
+        try write("1\n", to: p)
         XCTAssertTrue(LeaseParticipation.read(path: p))
-    }
-
-    func testWriteFormatMatchesShellWriters() throws {
-        let p = tmpPath()
-        defer { try? FileManager.default.removeItem(atPath: (p as NSString).deletingLastPathComponent) }
-        LeaseParticipation.write(false, path: p)
-        XCTAssertEqual(try String(contentsOfFile: p, encoding: .utf8), "0\n")
-        LeaseParticipation.write(true, path: p)
-        XCTAssertEqual(try String(contentsOfFile: p, encoding: .utf8), "1\n")
     }
 
     func testReadGarbageAndZeroSemantics() throws {
         let p = tmpPath()
         let dir = (p as NSString).deletingLastPathComponent
-        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: dir) }
         // Leading digit governs; trailing junk is ignored.
-        try "1 # participating\n".write(toFile: p, atomically: true, encoding: .utf8)
+        try write("1 # participating\n", to: p)
         XCTAssertTrue(LeaseParticipation.read(path: p))
-        try "0\n".write(toFile: p, atomically: true, encoding: .utf8)
+        try write("0\n", to: p)
         XCTAssertFalse(LeaseParticipation.read(path: p))
         // Any nonzero leading number ⇒ participating.
-        try "2\n".write(toFile: p, atomically: true, encoding: .utf8)
+        try write("2\n", to: p)
         XCTAssertTrue(LeaseParticipation.read(path: p))
         // Non-numeric garbage ⇒ the default (participating), never a false opt-out.
-        try "yes\n".write(toFile: p, atomically: true, encoding: .utf8)
+        try write("yes\n", to: p)
         XCTAssertTrue(LeaseParticipation.read(path: p))
-    }
-
-    func testWriteToUnwritablePathReturnsFalse() {
-        // A path under a non-directory parent can't be written → false, so the
-        // caller won't claim an opt-out state that never reached disk.
-        XCTAssertFalse(LeaseParticipation.write(false, path: "/dev/null/nope/flag"))
-    }
-
-    // MARK: - Host-wide aggregate rule (per-lane toggle → host flag)
-
-    func testHostParticipatingAggregateRule() {
-        // Turning any lane ON ⇒ participating, regardless of others.
-        XCTAssertTrue(LeaseParticipation.hostParticipating(togglingOn: true, otherLanesServing: false))
-        XCTAssertTrue(LeaseParticipation.hostParticipating(togglingOn: true, otherLanesServing: true))
-        // Turning a lane OFF opts out ONLY when no other lane is still serving.
-        XCTAssertTrue(LeaseParticipation.hostParticipating(togglingOn: false, otherLanesServing: true))
-        XCTAssertFalse(LeaseParticipation.hostParticipating(togglingOn: false, otherLanesServing: false))
     }
 }
