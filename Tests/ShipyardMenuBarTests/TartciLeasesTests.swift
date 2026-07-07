@@ -27,6 +27,66 @@ final class TartciLeasesTests: XCTestCase {
         XCTAssertEqual(snap.coreFraction, 8.0 / 12.0, accuracy: 0.0001)
     }
 
+    // MARK: - Live governor shape: `tartci leases --json` (capacity{} + leases[])
+
+    func testParseLiveLeasesJSONCapacityShape() throws {
+        // Trimmed from real `tartci leases --json` on a build host: the numbers
+        // live under `capacity` with `_mem_mb` spelling, and `leases` is a
+        // top-level ARRAY. Regression for the parser that read none of these and
+        // degraded the panel to "1 lease held".
+        let json = """
+        {
+          "capacity": {
+            "used_cores": 6, "total_cores": 14,
+            "used_mem_mb": 9216, "total_mem_mb": 118784,
+            "available_cores": 8, "available_mem_mb": 109568
+          },
+          "leases": [
+            {"id": "vm-a", "lease_size_cores": 6, "lease_size_mem_mb": 9216}
+          ],
+          "schema": 2
+        }
+        """
+        let snap = try XCTUnwrap(TartciLeases.parse(json))
+        XCTAssertEqual(snap.usedCores, 6)
+        XCTAssertEqual(snap.totalCores, 14)
+        XCTAssertEqual(snap.usedMemoryMB, 9216)
+        XCTAssertEqual(snap.totalMemoryMB, 118784)
+        XCTAssertEqual(snap.heldLeases, 1)
+        XCTAssertEqual(snap.summary, "6/14 cores · 9216/118784 MB")
+    }
+
+    // MARK: - `tartci status --json` folds the lease block under `leases`
+
+    func testParseStatusJSONNestedLeaseBlock() throws {
+        // Real `tartci status --json` puts the whole lease report under a
+        // `leases` OBJECT (not an array), so capacity is `leases.capacity` and
+        // the lease list is `leases.leases[]`.
+        let json = """
+        {
+          "host": {"hostname": "BlackBook-Pro.local"},
+          "leases": {
+            "capacity": {
+              "used_cores": 6, "total_cores": 14,
+              "used_mem_mb": 9216, "total_mem_mb": 118784
+            },
+            "leases": [
+              {"id": "vm-a"},
+              {"id": "vm-b"}
+            ]
+          },
+          "schema": 2
+        }
+        """
+        let snap = try XCTUnwrap(TartciLeases.parse(json))
+        XCTAssertEqual(snap.usedCores, 6)
+        XCTAssertEqual(snap.totalCores, 14)
+        XCTAssertEqual(snap.usedMemoryMB, 9216)
+        XCTAssertEqual(snap.totalMemoryMB, 118784)
+        XCTAssertEqual(snap.heldLeases, 2)   // counted from leases.leases[]
+        XCTAssertEqual(snap.summary, "6/14 cores · 9216/118784 MB")
+    }
+
     // MARK: - Tolerant of flat aliases and stringified numbers
 
     func testParseFlatAliasesAndStringNumbers() throws {

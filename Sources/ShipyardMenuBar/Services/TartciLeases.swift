@@ -85,31 +85,54 @@ enum TartciLeases {
         return .unavailable("governor not reporting leases")
     }
 
-    /// Parse a tartci lease/status JSON body. Tolerant by design: reads nested
-    /// `{cores:{used,total}}` / `{memory_mb:{used,total}}` blocks and a few common
-    /// flat aliases, counts `leases[]` (or a `held_leases` int), and picks up
-    /// `tier`. Returns nil for empty/invalid JSON or a body with no lease fields
-    /// at all (so `read` can fall through to the next probe). Internal for tests.
+    /// Parse a tartci lease/status JSON body. Tolerant by design, it accepts the
+    /// three shapes the toolkit has actually emitted:
+    ///
+    /// 1. The **live governor** (`tartci leases --json`): a top-level `capacity`
+    ///    object carrying `used_cores`/`total_cores`/`used_mem_mb`/`total_mem_mb`
+    ///    (note the `_mem_mb` spelling), plus a top-level `leases[]` array.
+    /// 2. **`tartci status --json`**: the same block folded one level down under a
+    ///    `leases` object (`leases.capacity`, `leases.leases[]`), so we descend
+    ///    into it before reading.
+    /// 3. **Assumed/legacy** shapes: a nested `{cores:{used,total}}` /
+    ///    `{memory_mb:{used,total}}` object, or flat aliases, or a `held_leases`
+    ///    int — kept so an older or differently-shaped governor still reads.
+    ///
+    /// Reads what it can and ignores the rest; picks up `tier` when present.
+    /// Returns nil for empty/invalid JSON or a body with no lease fields at all
+    /// (so `read` can fall through to the next probe). Internal for tests.
     static func parse(_ json: String) -> TartciLeaseSnapshot? {
         guard let data = json.data(using: .utf8),
               let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
 
+        // `tartci status --json` nests the whole lease report under a `leases`
+        // OBJECT; `tartci leases --json` puts it at the top level (there `leases`
+        // is instead an ARRAY). Descend into the object form so both shapes read
+        // the same below.
+        let block: [String: Any] = (top["leases"] as? [String: Any]) ?? top
+        // Live governor budgets live inside a `capacity` object.
+        let capacity = block["capacity"] as? [String: Any]
+
         let (usedCores, totalCores) = usedTotal(
-            in: top, nestedKey: "cores",
+            capacity: capacity, container: block, nestedKey: "cores",
             usedAliases: ["used_cores", "cores_used"],
             totalAliases: ["total_cores", "cores_total", "core_count"])
         let (usedMem, totalMem) = usedTotal(
-            in: top, nestedKey: "memory_mb",
-            usedAliases: ["used_memory_mb", "memory_used_mb"],
-            totalAliases: ["total_memory_mb", "memory_total_mb"])
+            capacity: capacity, container: block, nestedKey: "memory_mb",
+            usedAliases: ["used_mem_mb", "used_memory_mb", "memory_used_mb"],
+            totalAliases: ["total_mem_mb", "total_memory_mb", "memory_total_mb"])
 
         let held: Int = {
+            // Prefer a leases array wherever it lives (top-level for `leases
+            // --json`, or under the nested block for `status --json`).
+            if let leases = block["leases"] as? [Any] { return leases.count }
             if let leases = top["leases"] as? [Any] { return leases.count }
-            return intValue(top["held_leases"]) ?? intValue(top["held"]) ?? 0
+            return intValue(block["held_leases"]) ?? intValue(block["held"]) ?? 0
         }()
 
-        let tier = (top["tier"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let tier = (block["tier"] as? String ?? top["tier"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 }
 
         // A body that carried none of the governor's fields isn't a lease report
         // (e.g. `tartci status --json` on a build without the governor).
@@ -122,17 +145,27 @@ enum TartciLeases {
             heldLeases: held)
     }
 
-    /// Pull a used/total pair from either a nested `{used,total}` object under
-    /// `nestedKey` or flat aliased keys at the top level.
+    /// Pull a used/total pair, trying (in order): the live governor's `capacity`
+    /// object (aliased keys like `used_cores`/`used_mem_mb`), a nested
+    /// `{used,total}` object under `nestedKey`, then flat aliased keys on the
+    /// container.
     private static func usedTotal(
-        in top: [String: Any], nestedKey: String,
+        capacity: [String: Any]?, container: [String: Any], nestedKey: String,
         usedAliases: [String], totalAliases: [String]
     ) -> (used: Int, total: Int) {
-        if let nested = top[nestedKey] as? [String: Any] {
+        // 1) Live governor: {capacity: {used_cores, total_cores, used_mem_mb, …}}.
+        if let cap = capacity {
+            let used = usedAliases.lazy.compactMap { intValue(cap[$0]) }.first
+            let total = totalAliases.lazy.compactMap { intValue(cap[$0]) }.first
+            if used != nil || total != nil { return (used ?? 0, total ?? 0) }
+        }
+        // 2) Nested {used, total} object under `nestedKey`.
+        if let nested = container[nestedKey] as? [String: Any] {
             return (intValue(nested["used"]) ?? 0, intValue(nested["total"]) ?? 0)
         }
-        let used = usedAliases.lazy.compactMap { intValue(top[$0]) }.first ?? 0
-        let total = totalAliases.lazy.compactMap { intValue(top[$0]) }.first ?? 0
+        // 3) Flat aliased keys on the container.
+        let used = usedAliases.lazy.compactMap { intValue(container[$0]) }.first ?? 0
+        let total = totalAliases.lazy.compactMap { intValue(container[$0]) }.first ?? 0
         return (used, total)
     }
 
