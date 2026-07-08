@@ -124,12 +124,22 @@ lane **on** and the Mac joins that part of the pool and runs CI jobs in throwawa
 VMs; flip it **off** while you're working so builds don't run on your machine.
 
 - **Master "All lanes" switch** (shown when there's more than one lane) joins or
-  leaves the whole pool in one tap. Turning everything off mid-build warns first,
-  summing the in-progress builds across lanes.
-- Each toggle loads/unloads the lane's launchd agent and reflects live state —
-  *Not set up on this Mac*, *Not serving*, *Serving · idle*, *Waiting · N ready*
-  (a warm VM available for work), or *Building N jobs* — derived from the GitHub
-  **runner** state for that lane's labels.
+  leaves the whole pool in one tap. It delegates to the **`tartci pool
+  {on|off}`** CLI, so the app and the command line are one host-level opt-out —
+  flipping it here is identical to running `tartci pool off` in a terminal, and
+  they can never drift. Turning everything off mid-build warns first, summing the
+  in-progress builds across lanes. Because it goes through `tartci pool`, the
+  master switch also covers the host's **GitHub-native `actions.runner.*`
+  agents** (not just the lanes the per-lane list discovers) and writes the
+  governor's native-build participation flag; the header's *participating* state
+  is read from `tartci pool status --json`. If `tartci` isn't on `PATH`, it falls
+  back to toggling each discovered lane directly. See tartci's
+  `docs/runbook.md` → "Opt a host out of the CI pool".
+- Each **per-lane** toggle loads/unloads that lane's launchd agent for granular
+  control and reflects live state — *Not set up on this Mac*, *Not serving*,
+  *Serving · idle*, *Waiting · N ready* (a warm VM available for work), or
+  *Building N jobs* — derived from the GitHub **runner** state for that lane's
+  labels.
 - **Max macOS VMs at once** — a 1–2 control (Apple allows two macOS guests per
   host). Set it to 1 to keep a slot free while you work. The tartci macOS runners
   read it live, so changes take effect without reloading anything.
