@@ -186,7 +186,7 @@ final class CIServingTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: tmp) }
         let files = [
-            "com.danielraffel.pulp.tart-runner.plist",                      // gate → macOS · gate
+            "com.danielraffel.pulp.tart-runner-macos-gate.plist",           // gate → macOS · gate
             "com.danielraffel.pulp.tart-runner-sanitizer-macos.plist",      // macOS · sanitizer
             "com.danielraffel.pulp.tart-runner-macos-release.plist",        // macOS · release
             "com.danielraffel.pulp.tart-runner-linux.plist",                // Linux
@@ -210,8 +210,8 @@ final class CIServingTests: XCTestCase {
                 || $0.id.hasPrefix("com.apple") || $0.id.contains("launchd-home-proof")
         })
         let gate = try XCTUnwrap(lanes.first { $0.platform == "macOS · gate" })
-        XCTAssertEqual(gate.agentLabel, "com.danielraffel.pulp.tart-runner")
-        XCTAssertEqual(gate.plistPath, tmp + "/com.danielraffel.pulp.tart-runner.plist")
+        XCTAssertEqual(gate.agentLabel, "com.danielraffel.pulp.tart-runner-macos-gate")
+        XCTAssertEqual(gate.plistPath, tmp + "/com.danielraffel.pulp.tart-runner-macos-gate.plist")
     }
 
     func testDiscoverEmptyDirIsEmpty() throws {
@@ -228,6 +228,7 @@ final class CIServingTests: XCTestCase {
         XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-sanitizer-macos"), "macOS · sanitizer")
         XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-coverage"), "macOS · coverage")
         XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-release-cli"), "macOS · release")
+        XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-macos-gate"), "macOS · gate")
         XCTAssertEqual(n("com.danielraffel.pulp.tart-runner"), "macOS · gate")
         XCTAssertEqual(n("com.danielraffel.pulp.tart-runner-weird"), "macOS · tart-runner-weird")
     }
