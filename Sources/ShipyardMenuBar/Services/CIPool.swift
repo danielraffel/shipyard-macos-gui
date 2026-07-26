@@ -4,7 +4,7 @@ import Foundation
 ///
 /// `tartci pool off` writes `~/.config/tartci/native-build-participation=0` AND
 /// `launchctl unload`s every CI runner agent this host owns
-/// (`com.danielraffel.pulp.tart-runner`, `tart-runner-*`, `qemu-runner`,
+/// (`com.danielraffel.pulp.tart-runner-macos-gate`, `tart-runner-*`, `qemu-runner`,
 /// `qemu-runner-*`, `actions.runner.*`); `pool on` reverses both. Because the
 /// CLI owns the full runner-agent set — including the `actions.runner.*`
 /// GitHub-native runners the GUI's per-lane discovery does NOT cover — the GUI

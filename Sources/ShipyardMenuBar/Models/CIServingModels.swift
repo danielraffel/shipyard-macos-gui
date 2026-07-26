@@ -119,9 +119,11 @@ struct CIServingLane: Identifiable, Equatable {
         if suffix.contains("sanitizer") { return "macOS · sanitizer" }
         if suffix.contains("coverage") { return "macOS · coverage" }
         if suffix.contains("release") { return "macOS · release" }
-        // Name the plain gate runner so it's distinct from the other macOS lanes;
-        // any other unknown macOS lane keeps its label suffix to avoid collisions.
-        if suffix == "tart-runner" { return "macOS · gate" }
+        // Name the dedicated gate runner so it's distinct from the other macOS lanes.
+        // Keep the legacy unsuffixed label recognizable while TartCI migrates hosts.
+        if suffix == "tart-runner-macos-gate" || suffix == "tart-runner" {
+            return "macOS · gate"
+        }
         return "macOS · \(suffix)"
     }
 }

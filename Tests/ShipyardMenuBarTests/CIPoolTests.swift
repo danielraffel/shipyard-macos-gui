@@ -12,7 +12,7 @@ final class CIPoolTests: XCTestCase {
           "host": "BlackBook-Pro.local",
           "participating": true,
           "runners": [
-            {"label": "com.danielraffel.pulp.tart-runner", "loaded": true},
+            {"label": "com.danielraffel.pulp.tart-runner-macos-gate", "loaded": true},
             {"label": "actions.runner.danielraffel-pulp.pulp-build-m5", "loaded": true}
           ]
         }
@@ -26,7 +26,7 @@ final class CIPoolTests: XCTestCase {
           "host": "BlackBook-Pro.local",
           "participating": false,
           "runners": [
-            {"label": "com.danielraffel.pulp.tart-runner", "loaded": false}
+            {"label": "com.danielraffel.pulp.tart-runner-macos-gate", "loaded": false}
           ]
         }
         """
